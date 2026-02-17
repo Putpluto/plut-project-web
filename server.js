@@ -14,12 +14,13 @@ app.use(cors());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // --- 2. DUAL DATABASE SETUP ---
+// FIXED: dbWeb_batt is the correct variable name
 const dbWeb_batt = new sqlite3.Database('./plutobattery.db');
 const dbWeb = new sqlite3.Database('./pluto.db');
 const dbArchive = new sqlite3.Database('./pluto_archive.db');
 
 // OPTIMIZATION: WAL Mode allows concurrent reads/writes without locking
-[dbWeb, dbArchive].forEach(db => {
+[dbWeb, dbArchive, dbWeb_batt].forEach(db => {
     db.run("PRAGMA journal_mode=WAL;");
     db.run("PRAGMA busy_timeout = 5000;"); 
 });
@@ -33,6 +34,7 @@ function initFsaeTable(db) {
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
 }
+
 function initBatteryTable(db) {
     db.run(`CREATE TABLE IF NOT EXISTS battery_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,13 +57,18 @@ function initEarthquakeTable(db) {
 
 dbWeb.serialize(() => { initFsaeTable(dbWeb); initEarthquakeTable(dbWeb); });
 dbArchive.serialize(() => { initFsaeTable(dbArchive); initEarthquakeTable(dbArchive); });
-dbWeb_batt.serialize(() => { initBatteryTable(dbBatt); });
+
+// FIXED: Used correct variable dbWeb_batt instead of dbBatt
+dbWeb_batt.serialize(() => { initBatteryTable(dbWeb_batt); });
+
 // --- 4. PREPARED STATEMENTS ---
 const insertFsaeWeb = dbWeb.prepare("INSERT INTO messages (topic, value, timestamp) VALUES (?, ?, ?)");
 const insertEqWeb = dbWeb.prepare("INSERT INTO earthquake_logs (node_id, magnitude, timestamp) VALUES (?, ?, ?)");
 const insertFsaeArchive = dbArchive.prepare("INSERT INTO messages (topic, value, timestamp) VALUES (?, ?, ?)");
 const insertEqArchive = dbArchive.prepare("INSERT INTO earthquake_logs (node_id, magnitude, timestamp) VALUES (?, ?, ?)");
-const insertBatt = dbBatt.prepare("INSERT INTO battery_logs (node_id, voltage, raw_message, timestamp) VALUES (?, ?, ?, ?)");
+
+// FIXED: Used correct variable dbWeb_batt instead of dbBatt
+const insertBatt = dbWeb_batt.prepare("INSERT INTO battery_logs (node_id, voltage, raw_message, timestamp) VALUES (?, ?, ?, ?)");
 
 // --- 5. MQTT SETUP ---
 let brokerStatus = "Disconnected";
@@ -91,7 +98,6 @@ mqttClient.on('message', (topic, message) => {
 
     // --- CRITICAL FILTER: DO NOT SAVE MAIN NODE HEARTBEATS ---
     if (value.toLowerCase().includes("main node:")) {
-        // We already emitted to the frontend above, so just stop here
         return; 
     }
 
@@ -101,9 +107,20 @@ mqttClient.on('message', (topic, message) => {
         insertFsaeArchive.run(topic, value, now);
     } else if (topic.startsWith('home/earthquake/')) {
         const nodeName = topic.split('/').pop(); 
+        
+        // 1. Save to Earthquake Logs
         insertEqWeb.run(nodeName, value, now);
         insertEqArchive.run(nodeName, value, now);
         console.log(`📉 Seismic Log: ${nodeName} -> ${value}`);
+
+        // 2. NEW: Extract and Save Battery Data
+        // Check if message looks like "Node 1: Alive, 4.02v" or just contains a voltage
+        const voltageMatch = value.match(/(\d+\.\d+)v/i);
+        if (voltageMatch) {
+            const voltage = voltageMatch[1];
+            insertBatt.run(nodeName, voltage, value, now);
+            console.log(`🔋 Battery Log: ${nodeName} -> ${voltage}V`);
+        }
     }
 });
 
@@ -122,6 +139,7 @@ app.get('/api/earthquake', (req, res) => {
 });
 
 app.get('/api/battery', (req, res) => {
+    // FIXED: Query the correct database variable
     dbWeb_batt.all("SELECT * FROM battery_logs ORDER BY id DESC LIMIT 500", (err, rows) => {
         if (err) res.status(500).json({ error: err.message }); else res.json(rows);
     });
@@ -132,17 +150,29 @@ app.delete('/api/history', (req, res) => {
     if (!clientKey || clientKey !== process.env.ADMIN_KEY) {
         return res.status(403).json({ error: "Unauthorized" });
     }
-    dbWeb.serialize(() => {
-        dbWeb.run("DELETE FROM messages");
-        dbWeb.run("DELETE FROM earthquake_logs");
-        dbWeb.run("VACUUM", (err) => {
-            if (err) res.status(500).json({ error: err.message });
-            else {
-                io.emit('history_cleared');
-                res.json({ message: "All history deleted" });
-            }
+    
+    // Parallel cleanup
+    const cleanWeb = new Promise((resolve, reject) => {
+        dbWeb.serialize(() => {
+            dbWeb.run("DELETE FROM messages");
+            dbWeb.run("DELETE FROM earthquake_logs");
+            dbWeb.run("VACUUM", (err) => err ? reject(err) : resolve());
         });
     });
+
+    const cleanBatt = new Promise((resolve, reject) => {
+        dbWeb_batt.serialize(() => {
+            dbWeb_batt.run("DELETE FROM battery_logs");
+            dbWeb_batt.run("VACUUM", (err) => err ? reject(err) : resolve());
+        });
+    });
+
+    Promise.all([cleanWeb, cleanBatt])
+        .then(() => {
+            io.emit('history_cleared');
+            res.json({ message: "All history deleted" });
+        })
+        .catch(err => res.status(500).json({ error: err.message }));
 });
 
 io.on('connection', (socket) => {
