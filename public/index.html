@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Earthquake Control Panel</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        :root {
+            --bg-dark: #0d1117;
+            --bg-panel: #161b22;
+            --bg-header: #21262d;
+            --border: #30363d;
+            --text-main: #c9d1d9;
+            --text-dim: #8b949e;
+            --accent: #58a6ff;
+            --online: #3fb950;
+            --offline: #f85149;
+            --mag-color: #ff7b72; 
+            --batt-high: #3fb950;
+            --batt-med: #d29922;
+            --batt-low: #f85149;
+        }
+
+        * { box-sizing: border-box; }
+
+        body { 
+            background-color: var(--bg-dark); 
+            color: var(--text-main); 
+            font-family: 'Consolas', 'Courier New', monospace; 
+            padding: 10px; 
+            margin: 0;
+        }
+        
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+
+        .header-status-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        h2 { 
+            margin: 0; 
+            color: var(--accent); 
+            font-size: 1.2rem;
+            letter-spacing: 0.5px; 
+        }
+
+        #status-badge {
+            font-size: 0.75em;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-weight: bold;
+            background-color: var(--bg-header); 
+            color: var(--text-dim);
+            white-space: nowrap;
+        }
+        
+        .status-online { background-color: #238636 !important; color: white !important; }
+        .status-offline { background-color: #da3633 !important; color: white !important; }
+
+        .dashboard-wrapper {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        @media (min-width: 850px) {
+            .dashboard-wrapper { flex-direction: row; align-items: flex-start; }
+            body { padding: 20px; }
+            h2 { font-size: 1.5rem; }
+        }
+
+        #log-container {
+            flex: 1;
+            border: 1px solid var(--border); 
+            border-radius: 8px;
+            background-color: var(--bg-panel);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+        }
+
+        #log-list {
+            height: 400px;
+            overflow-y: auto; 
+            scroll-behavior: smooth;
+        }
+
+        @media (min-width: 850px) {
+            #log-list { height: 550px; }
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+
+        thead th {
+            position: sticky;
+            top: 0;
+            background-color: var(--bg-header);
+            color: var(--text-dim);
+            padding: 12px 10px;
+            text-align: left;
+            font-size: 0.75em;
+            border-bottom: 1px solid var(--border);
+            z-index: 10;
+        }
+
+        @media (min-width: 850px) { thead th { font-size: 0.85em; } }
+
+        tbody td {
+            padding: 8px 10px;
+            border-bottom: 1px solid #21262d;
+            font-size: 0.75em;
+            vertical-align: top;
+        }
+
+        @media (min-width: 850px) { tbody td { font-size: 0.85em; } }
+        tbody tr:nth-child(even) { background-color: var(--bg-dark); }
+        
+        .col-time { width: 95px; color: var(--text-dim); }
+        .col-mag { width: 110px; color: var(--mag-color); font-weight: bold; text-align: center; }
+        .col-msg { color: #a5d6ff; word-break: break-all; }
+
+        #node-status-panel {
+            width: 100%;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background-color: var(--bg-panel);
+        }
+
+        @media (min-width: 850px) {
+            #node-status-panel { width: 300px; position: sticky; top: 20px; }
+        }
+
+        .panel-header {
+            background-color: var(--bg-header);
+            padding: 12px;
+            font-weight: bold;
+            color: var(--text-dim);
+            border-bottom: 1px solid var(--border);
+            text-align: center;
+            font-size: 0.85em;
+        }
+
+        .node-card {
+            padding: 12px;
+            border-bottom: 1px solid var(--border);
+            position: relative;
+        }
+        .node-card:last-child { border-bottom: none; }
+
+        .node-info { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+        .node-name { font-weight: bold; color: var(--accent); font-size: 0.9em; }
+        
+        .node-badge {
+            font-size: 0.65em;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: bold;
+        }
+
+        .badge-offline { background-color: #3e2020; color: var(--offline); border: 1px solid #6e2d2d; }
+        .badge-online { background-color: #1e3a22; color: var(--online); border: 1px solid #2d6e35; }
+
+        .node-footer { 
+            font-size: 0.75em; 
+            color: var(--text-dim); 
+            display: grid; 
+            grid-template-columns: 1fr 1fr; 
+            gap: 5px; 
+            align-items: center;
+        }
+        .node-val { color: #a5d6ff; }
+        
+        .batt-wrapper {
+            grid-column: span 2;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            margin-top: 5px;
+            background: rgba(255,255,255,0.05);
+            padding: 4px;
+            border-radius: 4px;
+        }
+        
+        .batt-bar-bg {
+            flex: 1;
+            height: 6px;
+            background: #30363d;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        
+        .batt-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: var(--batt-high);
+            transition: width 0.3s ease, background-color 0.3s ease;
+        }
+        
+        .batt-text { font-size: 0.9em; font-weight: bold; min-width: 45px; text-align: right; }
+
+        .btn-history {
+            grid-column: span 2;
+            margin-top: 8px;
+            background-color: #1f6feb;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 0;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.8em;
+            font-weight: bold;
+            opacity: 0.8;
+            transition: opacity 0.2s;
+        }
+        .btn-history:hover { opacity: 1; }
+
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .modal-content {
+            background: var(--bg-panel);
+            width: 90%;
+            max-width: 500px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            max-height: 80vh;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            overflow: hidden;
+        }
+
+        .modal-header {
+            padding: 12px;
+            background: var(--bg-header);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .modal-title { font-weight: bold; color: var(--accent); }
+        
+        .btn-close {
+            background: none; border: none; color: var(--text-dim);
+            font-size: 1.2em; cursor: pointer;
+        }
+        .btn-close:hover { color: white; }
+
+        .chart-wrapper {
+            width: 100%;
+            height: 150px;
+            background: #0d1117;
+            border-bottom: 1px solid var(--border);
+            position: relative;
+        }
+        
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        .modal-body {
+            padding: 0;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .history-item {
+            padding: 8px 12px;
+            border-bottom: 1px solid #21262d;
+            font-size: 0.8em;
+            display: flex;
+            justify-content: space-between;
+        }
+        .history-item:nth-child(even) { background: var(--bg-dark); }
+        .history-time { color: var(--text-dim); min-width: 80px; }
+        .history-msg { color: #a5d6ff; text-align: right; }
+
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h2>EARTHQUAKE CONTROL</h2>
+        <div class="header-status-group">
+            <!-- Removed Main Node Badge -->
+            <div id="status-badge">CONNECTING...</div>
+        </div>
+    </div>
+
+    <div class="dashboard-wrapper">
+        <div id="log-container">
+            <div id="log-list">
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="col-time">TIME</th>
+                            <th class="col-mag">MAGNITUDE</th>
+                            <th class="col-msg">MESSAGE</th>
+                        </tr>
+                    </thead>
+                    <tbody id="log-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="node-status-panel">
+            <div class="panel-header">NODE MONITOR</div>
+            <div id="node-list">
+                <!-- Node 1 -->
+                <div class="node-card" id="card-node1">
+                    <div class="node-info">
+                        <span class="node-name">Node 1</span>
+                        <span class="node-badge badge-offline">OFFLINE</span>
+                    </div>
+                    <div class="node-footer">
+                        <span>Updated: <span class="node-time">Never</span></span>
+                        <span>Voltage: <span class="node-val">N/A</span></span>
+                        <div class="batt-wrapper" style="opacity: 0.3;">
+                            <div class="batt-bar-bg"><div class="batt-bar-fill" style="width: 0%"></div></div>
+                            <span class="batt-text">--%</span>
+                        </div>
+                        <button class="btn-history" onclick="openNodeHistory('node1')">VIEW HISTORY</button>
+                    </div>
+                </div>
+                <!-- Node 2 -->
+                <div class="node-card" id="card-node2">
+                    <div class="node-info">
+                        <span class="node-name">Node 2</span>
+                        <span class="node-badge badge-offline">OFFLINE</span>
+                    </div>
+                    <div class="node-footer">
+                        <span>Updated: <span class="node-time">Never</span></span>
+                        <span>Voltage: <span class="node-val">N/A</span></span>
+                        <div class="batt-wrapper" style="opacity: 0.3;">
+                            <div class="batt-bar-bg"><div class="batt-bar-fill" style="width: 0%"></div></div>
+                            <span class="batt-text">--%</span>
+                        </div>
+                        <button class="btn-history" onclick="openNodeHistory('node2')">VIEW HISTORY</button>
+                    </div>
+                </div>
+                <!-- Node 3 -->
+                <div class="node-card" id="card-node3">
+                    <div class="node-info">
+                        <span class="node-name">Node 3</span>
+                        <span class="node-badge badge-offline">OFFLINE</span>
+                    </div>
+                    <div class="node-footer">
+                        <span>Updated: <span class="node-time">Never</span></span>
+                        <span>Voltage: <span class="node-val">N/A</span></span>
+                        <div class="batt-wrapper" style="opacity: 0.3;">
+                            <div class="batt-bar-bg"><div class="batt-bar-fill" style="width: 0%"></div></div>
+                            <span class="batt-text">--%</span>
+                        </div>
+                        <button class="btn-history" onclick="openNodeHistory('node3')">VIEW HISTORY</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="history-modal" class="modal-overlay" onclick="closeModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <span id="modal-title" class="modal-title">Node History</span>
+                <button class="btn-close" onclick="closeModal()">×</button>
+            </div>
+            <div class="chart-wrapper">
+                <canvas id="historyChart"></canvas>
+            </div>
+            <div class="modal-body" id="modal-log-list">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const logTbody = document.getElementById('log-tbody');
+        const logListDiv = document.getElementById('log-list');
+        const statusBadge = document.getElementById('status-badge');
+
+        const nodeLastSeen = {
+            'node1': null,
+            'node2': null,
+            'node3': null
+        };
+        
+        // Removed lastMqttMessageTime variable
+
+        const nodeHistoryLogs = {
+            'node1': [],
+            'node2': [],
+            'node3': []
+        };
+
+        let currentChartNode = null;
+
+        function parsePayload(rawVal) {
+            if (!rawVal) return { magnitude: 'N/A', message: '' };
+            const parts = rawVal.split(',');
+            
+            // Check if first part is a number
+            const firstPart = parts[0].trim();
+            const isNumeric = !isNaN(parseFloat(firstPart)) && isFinite(firstPart);
+
+            if (parts.length > 1) {
+                return {
+                    magnitude: isNumeric ? firstPart : '-',
+                    message: isNumeric ? parts.slice(1).join(', ').trim() : rawVal
+                };
+            }
+            return { magnitude: isNumeric ? rawVal : '-', message: isNumeric ? '' : rawVal };
+        }
+
+        function createRow(timeStr, magnitude, message) {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="col-time">${timeStr}</td>
+                <td class="col-mag">${magnitude}</td>
+                <td class="col-msg">${message}</td>
+            `;
+            return tr;
+        }
+
+        function scrollToBottom() {
+            logListDiv.scrollTop = logListDiv.scrollHeight;
+        }
+
+        function updateBatteryUI(card, voltage) {
+            if (!card) return;
+            const battWrapper = card.querySelector('.batt-wrapper');
+            const battFill = card.querySelector('.batt-bar-fill');
+            const battText = card.querySelector('.batt-text');
+            const valText = card.querySelector('.node-val');
+
+            if (!voltage) {
+                battWrapper.style.opacity = "0.3";
+                battText.innerText = "--%";
+                battFill.style.width = "0%";
+                return;
+            }
+
+            valText.innerText = voltage;
+
+            const v = parseFloat(voltage);
+            if (isNaN(v)) return;
+
+            let pct = ((v - 3.0) / (4.2 - 3.0)) * 100;
+            pct = Math.max(0, Math.min(100, pct)); 
+
+            battWrapper.style.opacity = "1";
+            battText.innerText = Math.round(pct) + "%";
+            battFill.style.width = pct + "%";
+
+            if (pct > 50) battFill.style.backgroundColor = "var(--batt-high)";
+            else if (pct > 20) battFill.style.backgroundColor = "var(--batt-med)";
+            else battFill.style.backgroundColor = "var(--batt-low)";
+        }
+
+        function addToNodeHistory(nodeId, timestamp, msg, value) {
+            if (!nodeHistoryLogs[nodeId]) return;
+            
+            const timeStr = new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+            
+            nodeHistoryLogs[nodeId].unshift({
+                time: timeStr,
+                msg: msg,
+                value: value 
+            });
+
+            if (nodeHistoryLogs[nodeId].length > 100) {
+                nodeHistoryLogs[nodeId].pop();
+            }
+
+            if (currentChartNode === nodeId) {
+                 drawHistoryChart(nodeId);
+            }
+        }
+
+        function openNodeHistory(nodeId) {
+            currentChartNode = nodeId;
+            const modal = document.getElementById('history-modal');
+            const title = document.getElementById('modal-title');
+            const list = document.getElementById('modal-log-list');
+
+            title.innerText = nodeId.toUpperCase() + " HISTORY";
+            list.innerHTML = "";
+
+            const logs = nodeHistoryLogs[nodeId] || [];
+            if (logs.length === 0) {
+                list.innerHTML = `<div class="history-item" style="justify-content:center; color:#8b949e;">No history available</div>`;
+            } else {
+                logs.forEach(log => {
+                    const div = document.createElement('div');
+                    div.className = 'history-item';
+                    div.innerHTML = `
+                        <span class="history-time">${log.time}</span>
+                        <span class="history-msg">${log.msg}</span>
+                    `;
+                    list.appendChild(div);
+                });
+            }
+
+            modal.style.display = "flex";
+            setTimeout(() => drawHistoryChart(nodeId), 50);
+        }
+
+        function closeModal(event) {
+            document.getElementById('history-modal').style.display = "none";
+            currentChartNode = null;
+        }
+        
+        function drawHistoryChart(nodeId) {
+            const canvas = document.getElementById('historyChart');
+            const ctx = canvas.getContext('2d');
+            const logs = nodeHistoryLogs[nodeId] || [];
+            
+            const rect = canvas.parentNode.getBoundingClientRect();
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+            const w = canvas.width;
+            const h = canvas.height;
+
+            const dataPoints = [...logs].reverse().filter(l => l.value !== null && !isNaN(l.value));
+            
+            ctx.clearRect(0, 0, w, h);
+            
+            const yMin = 0;
+            const yMax = 4.5;
+            const yRange = yMax - yMin;
+
+            ctx.strokeStyle = "#21262d";
+            ctx.lineWidth = 1;
+            ctx.font = "10px Consolas";
+            ctx.fillStyle = "#8b949e";
+            ctx.textAlign = "left";
+
+            for (let i = 0; i <= 4; i++) {
+                const val = yMin + (yRange * (i / 4));
+                const yPos = h - ((val - yMin) / yRange * h);
+                const drawY = Math.min(Math.max(yPos, 10), h - 5);
+                ctx.beginPath();
+                ctx.moveTo(0, drawY); ctx.lineTo(w, drawY);
+                ctx.stroke();
+                ctx.fillText(val.toFixed(1) + "V", 5, drawY - 2);
+            }
+
+            if (dataPoints.length === 0) {
+                ctx.textAlign = "center";
+                ctx.fillText("Waiting for numeric data...", w/2, h/2);
+                return;
+            }
+
+            ctx.beginPath();
+            ctx.strokeStyle = "#58a6ff";
+            ctx.lineWidth = 2;
+
+            dataPoints.forEach((pt, i) => {
+                const x = dataPoints.length === 1 ? w/2 : (i / (dataPoints.length - 1)) * w;
+                const normalizedY = (pt.value - yMin) / yRange;
+                const clampedY = Math.max(0, Math.min(1, normalizedY));
+                const drawY = h - (clampedY * h);
+                
+                if (i === 0) ctx.moveTo(x, drawY);
+                else ctx.lineTo(x, drawY);
+            });
+            ctx.stroke();
+
+            ctx.fillStyle = "#fff";
+            dataPoints.forEach((pt, i) => {
+                const x = dataPoints.length === 1 ? w/2 : (i / (dataPoints.length - 1)) * w;
+                const normalizedY = (pt.value - yMin) / yRange;
+                const clampedY = Math.max(0, Math.min(1, normalizedY));
+                const drawY = h - (clampedY * h);
+                ctx.beginPath();
+                ctx.arc(x, drawY, 3, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            
+            const lastPt = dataPoints[dataPoints.length - 1];
+            ctx.textAlign = "right";
+            ctx.fillStyle = "#58a6ff";
+            ctx.font = "bold 12px Consolas";
+            ctx.fillText(lastPt.value.toFixed(2) + "V", w - 10, 15);
+        }
+
+        function updateNodeUI(topic, rawValue, timestamp) {
+            if (topic !== 'home/earthquake/main_node') return;
+
+            const parts = rawValue.split(',');
+            const firstPart = parts[0].trim();
+            const magnitude = (!isNaN(parseFloat(firstPart)) && !firstPart.includes(':')) ? firstPart : null;
+
+            parts.forEach((part, index) => {
+                // RULE: If the part contains "main node", skip buffer updates entirely
+                if (part.toLowerCase().includes("main node")) return;
+
+                const match = part.match(/node\s*(\d+)\s*:\s*(confirmed|alive|false)/i);
+                
+                if (match) {
+                    const nodeNum = match[1];
+                    const status = match[2].toLowerCase();
+                    const nodeId = `node${nodeNum}`; 
+                    
+                    const card = document.getElementById(`card-${nodeId}`);
+                    if (card) {
+                        const badge = card.querySelector('.node-badge');
+                        const timeText = card.querySelector('.node-time');
+
+                        if (status === 'confirmed' || status === 'alive' || status === 'false') {
+                            nodeLastSeen[nodeId] = new Date(timestamp).getTime();
+                            badge.innerText = "ONLINE";
+                            badge.className = "node-badge badge-online";
+                        }
+
+                        timeText.innerText = new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+                        
+                        let extraInfo = "";
+                        let graphValue = null;
+
+                        if (parts[index + 1]) {
+                            const nextPart = parts[index + 1].trim();
+                            if (/^\d+(\.\d+)?v?$/i.test(nextPart)) {
+                                updateBatteryUI(card, nextPart);
+                                extraInfo = ` | Batt: ${nextPart}`;
+                                graphValue = parseFloat(nextPart);
+                            }
+                        }
+
+                        if (graphValue === null && magnitude !== null) {
+                            graphValue = parseFloat(magnitude);
+                        }
+
+                        // STRICT FILTER: Only allow 'alive' or 'false' in history logs/graph
+                        // This prevents 'confirmed' status from flooding the list and skewing the graph
+                        if (status === 'alive' || status === 'false') {
+                             const logMsg = `Status: ${status}${extraInfo}`;
+                             addToNodeHistory(nodeId, timestamp, logMsg, graphValue);
+                        }
+                    }
+                }
+            });
+        }
+
+        setInterval(() => {
+            const now = Date.now();
+            // Removed Main Node watchdog logic here
+            const timeoutThreshold = 90 * 60 * 1000; 
+            Object.keys(nodeLastSeen).forEach(nodeId => {
+                if (nodeLastSeen[nodeId] && (now - nodeLastSeen[nodeId] > timeoutThreshold)) {
+                    const card = document.getElementById(`card-${nodeId}`);
+                    if (card) {
+                        const badge = card.querySelector('.node-badge');
+                        badge.innerText = "OFFLINE";
+                        badge.className = "node-badge badge-offline";
+                        nodeLastSeen[nodeId] = null; 
+                        updateBatteryUI(card, null);
+                    }
+                }
+            });
+        }, 1000); 
+
+        socket.on('status_update', (data) => {
+            statusBadge.innerText = data.status;
+            statusBadge.classList.remove('status-online', 'status-offline');
+            if (data.status === 'ONLINE') statusBadge.classList.add('status-online');
+            else statusBadge.classList.add('status-offline');
+        });
+
+        Promise.all([
+            fetch('/api/history').then(res => res.json()),
+            fetch('/api/earthquake').then(res => res.json())
+        ]).then(([carData, quakeData]) => {
+            const normalizedQuakes = quakeData.map(q => {
+                const parsed = parsePayload(q.magnitude);
+                return {
+                    mag: parsed.magnitude,
+                    msg: parsed.message || `Node: ${q.node_id}`,
+                    timestamp: q.timestamp,
+                    rawTopic: `home/earthquake/main_node`, 
+                    rawVal: q.magnitude
+                };
+            });
+            const normalizedCars = carData.map(c => {
+                const parsed = parsePayload(c.value);
+                return {
+                    mag: parsed.magnitude,
+                    msg: parsed.message || `Topic: ${c.topic}`,
+                    timestamp: c.timestamp,
+                    rawTopic: c.topic,
+                    rawVal: c.value
+                };
+            });
+            const allHistory = [...normalizedCars, ...normalizedQuakes];
+            allHistory.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            allHistory.forEach(item => {
+                const time = new Date(item.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+                const cleanVal = item.rawVal ? item.rawVal.trim() : "";
+                
+                const startsWithNumber = /^\d/.test(cleanVal);
+                const hasStatus = /(confirmed|false)/i.test(cleanVal);
+                
+                if (startsWithNumber && hasStatus) {
+                    logTbody.appendChild(createRow(time, item.mag, item.msg));
+                }
+                updateNodeUI(item.rawTopic, item.rawVal, item.timestamp);
+            });
+            scrollToBottom();
+        });
+
+        socket.on('mqtt_message', (data) => {
+            const now = new Date();
+            // Removed Main Node UI Update logic here
+            
+            updateNodeUI(data.topic, data.value, now);
+            
+            const cleanVal = data.value.trim();
+            const startsWithNumber = /^\d/.test(cleanVal);
+            const hasStatus = /(confirmed|false)/i.test(cleanVal);
+            
+            if (startsWithNumber && hasStatus) {
+                const time = now.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+                const parsed = parsePayload(data.value);
+                let displayMag = parsed.magnitude;
+                let displayMsg = parsed.message;
+                if (!displayMsg) {
+                    displayMsg = data.topic.includes('earthquake') 
+                        ? `Node: ${data.topic.split('/').pop()}` 
+                        : `Topic: ${data.topic}`;
+                }
+                logTbody.appendChild(createRow(time, displayMag, displayMsg)); 
+                if (logTbody.children.length > 100) logTbody.firstChild.remove();
+                scrollToBottom();
+            }
+        });
+
+        socket.on('history_cleared', () => {
+            logTbody.innerHTML = '';
+            Object.keys(nodeLastSeen).forEach(key => nodeLastSeen[key] = null);
+            nodeHistoryLogs['node1'] = [];
+            nodeHistoryLogs['node2'] = [];
+            nodeHistoryLogs['node3'] = [];
+            document.querySelectorAll('.node-badge').forEach(b => {
+                b.innerText = "OFFLINE";
+                b.className = "node-badge badge-offline";
+            });
+            document.querySelectorAll('.node-time').forEach(t => t.innerText = "Never");
+            document.querySelectorAll('.node-val').forEach(v => v.innerText = "N/A");
+            document.querySelectorAll('.node-card').forEach(card => updateBatteryUI(card, null));
+            const systemRow = createRow(new Date().toLocaleTimeString(), "SYSTEM", "⚠️ Logs Cleared");
+            systemRow.style.color = "#ff5555";
+            logTbody.appendChild(systemRow);
+        });
+    </script>
+</body>
+</html>
