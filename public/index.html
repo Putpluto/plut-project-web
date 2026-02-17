@@ -252,6 +252,9 @@
         .history-time { color: var(--text-dim); min-width: 80px; }
         .history-msg { color: #a5d6ff; text-align: right; }
 
+        /* Allow node-time to wrap so date+time display cleanly */
+        .node-time { display: inline-block; }
+
     </style>
 </head>
 <body>
@@ -384,6 +387,13 @@
 
         function scrollToBottom() { logListDiv.scrollTop = logListDiv.scrollHeight; }
 
+        function formatNodeDateTime(timestamp) {
+            const d = new Date(timestamp);
+            const date = d.toLocaleDateString([], { month: '2-digit', day: '2-digit', year: '2-digit' });
+            const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            return date + ' ' + time;
+        }
+
         function updateBatteryUI(card, voltage) {
             const battWrapper = card.querySelector('.batt-wrapper');
             const battFill = card.querySelector('.batt-bar-fill');
@@ -512,7 +522,9 @@
 
                     nodeLastSeen[nodeId] = new Date(timestamp).getTime();
                     badge.innerText = "ONLINE"; badge.className = "node-badge badge-online";
-                    timeText.innerText = new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+
+                    // ✅ Show both date and time
+                    timeText.innerText = formatNodeDateTime(timestamp);
                     
                     let extraInfo = ""; let graphValue = null;
                     if (parts[index + 1] && /^\d+(\.\d+)?v?$/i.test(parts[index + 1].trim())) {
@@ -524,7 +536,6 @@
 
                     if (graphValue === null && magnitude !== '-') graphValue = parseFloat(magnitude);
 
-                    // RE-INCLUDED 'CONFIRMED' STATUS LOGGING
                     const logMsg = `Status: ${status}${extraInfo}`;
                     addToNodeHistory(nodeId, timestamp, logMsg, graphValue);
                 }
@@ -558,10 +569,9 @@
         Promise.all([
             fetch('/api/history').then(res => res.json()),
             fetch('/api/earthquake').then(res => res.json()),
-            fetch('/api/battery').then(res => res.json()) // Fetch new Battery DB
+            fetch('/api/battery').then(res => res.json())
         ]).then(([carData, quakeData, battData]) => {
             
-            // 1. Map Quake Events (Main DB)
             const quakeEvents = quakeData.map(q => ({
                 mag: parsePayload(q.magnitude).magnitude,
                 msg: parsePayload(q.magnitude).message || `Node: ${q.node_id}`,
@@ -570,7 +580,6 @@
                 rawVal: q.magnitude
             }));
 
-            // 2. Map Car/Legacy Data
             const carEvents = carData.map(c => ({
                 mag: parsePayload(c.value).magnitude,
                 msg: parsePayload(c.value).message || `Topic: ${c.topic}`,
@@ -579,7 +588,6 @@
                 rawVal: c.value
             }));
 
-            // 3. Map Battery Events (New DB)
             const battEvents = battData.map(b => ({
                 mag: '-',
                 msg: b.raw_message,
@@ -588,7 +596,6 @@
                 rawVal: b.raw_message
             }));
 
-            // Main Table: Show only confirmed/false events (exclude battery heartbeats)
             const mainTableEvents = [...quakeEvents, ...carEvents];
             mainTableEvents.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
             mainTableEvents.forEach(item => {
@@ -597,7 +604,6 @@
                 }
             });
 
-            // Node History: Use ALL data (Quakes + Battery) to populate graphs and modals
             const fullNodeHistory = [...quakeEvents, ...battEvents];
             fullNodeHistory.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
             fullNodeHistory.forEach(item => {
