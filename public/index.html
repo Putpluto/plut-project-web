@@ -249,7 +249,7 @@
             display: flex; justify-content: space-between;
         }
         .history-item:nth-child(even) { background: var(--bg-dark); }
-        .history-time { color: var(--text-dim); min-width: 80px; }
+        .history-time { color: var(--text-dim); min-width: 130px; }
         .history-msg { color: #a5d6ff; text-align: right; }
 
         /* Allow node-time to wrap so date+time display cleanly */
@@ -387,13 +387,6 @@
 
         function scrollToBottom() { logListDiv.scrollTop = logListDiv.scrollHeight; }
 
-        function formatNodeDateTime(timestamp) {
-            const d = new Date(timestamp);
-            const date = d.toLocaleDateString([], { month: '2-digit', day: '2-digit', year: '2-digit' });
-            const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-            return date + ' ' + time;
-        }
-
         function updateBatteryUI(card, voltage) {
             const battWrapper = card.querySelector('.batt-wrapper');
             const battFill = card.querySelector('.batt-bar-fill');
@@ -420,8 +413,11 @@
         }
 
         function addToNodeHistory(nodeId, timestamp, msg, value) {
-            const timeStr = new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
-            nodeHistoryLogs[nodeId].unshift({ time: timeStr, msg: msg, value: value });
+            const d = new Date(timestamp);
+            const dateStr = d.toLocaleDateString([], { month: '2-digit', day: '2-digit', year: '2-digit' });
+            const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const fullStr = dateStr + ' ' + timeStr;
+            nodeHistoryLogs[nodeId].unshift({ time: fullStr, msg: msg, value: value });
             if (nodeHistoryLogs[nodeId].length > 100) nodeHistoryLogs[nodeId].pop();
             if (currentChartNode === nodeId) drawHistoryChart(nodeId);
         }
@@ -523,8 +519,7 @@
                     nodeLastSeen[nodeId] = new Date(timestamp).getTime();
                     badge.innerText = "ONLINE"; badge.className = "node-badge badge-online";
 
-                    // ✅ Show both date and time
-                    timeText.innerText = formatNodeDateTime(timestamp);
+                    timeText.innerText = new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
                     
                     let extraInfo = ""; let graphValue = null;
                     if (parts[index + 1] && /^\d+(\.\d+)?v?$/i.test(parts[index + 1].trim())) {
