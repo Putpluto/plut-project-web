@@ -414,7 +414,7 @@
 
         function addToNodeHistory(nodeId, timestamp, msg, value) {
             const d = new Date(timestamp);
-            const dateStr = d.toLocaleDateString([], {  day: '2-digit', month: '2-digit', year: '4-digit' });
+            const dateStr = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
             const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
             const fullStr = dateStr + ' ' + timeStr;
             nodeHistoryLogs[nodeId].unshift({ time: fullStr, msg: msg, value: value });
