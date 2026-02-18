@@ -71,7 +71,7 @@ mqttClient.on('message', (topic, message) => {
         console.log(`📡 Status Change: ${topic} -> ${value}`);
     }
 
-    // 1. EMIT TO FRONTEND (Send LWT messages so UI updates immediately)
+    // 1. EMIT TO FRONTEND — always emit with topic so frontend can filter correctly
     io.emit('mqtt_message', { topic, value, timestamp: now });
 
     // 2. Ignore pure heartbeats for DB saving
@@ -88,8 +88,12 @@ mqttClient.on('message', (topic, message) => {
         insertEqWeb.run(nodeName, value, now);
         insertEqArchive.run(nodeName, value, now);
 
-        // SAVE TO BATTERY DB (Filter confirmed AND LWT status messages)
-        const voltageMatch = value.match(/(\d+\.\d+)v/i);
+        // BUG 3 FIX: Use a tighter voltage regex that only matches the numeric
+        // portion of the voltage string (e.g. "3.85" from "3.85V"), anchored to
+        // reject compound strings like "3.85V,MOTION DETECTED".
+        // The .ino now sends clean voltage-only strings (e.g. "node1:alive,3.85V"),
+        // but this defensive regex ensures we never store garbage even if format drifts.
+        const voltageMatch = value.match(/(?:^|,)(\d+\.\d+)[Vv](?:,|$)/);
         const isStatusMsg = value === "ONLINE" || value === "OFFLINE" || value.toLowerCase().includes("confirmed");
         
         if (voltageMatch && !isStatusMsg) {

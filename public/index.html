@@ -526,7 +526,7 @@
         function updateNodeUI(topic, rawValue, timestamp) {
             if (!topic.includes('earthquake/main_node')) return;
             
-            // --- FILTER: Block 'confirmed', 'ONLINE', 'OFFLINE' from graphs/history ---
+            // --- FILTER: Block 'confirmed', 'ONLINE', 'OFFLINE' from node graphs/cards ---
             if (rawValue.toLowerCase().includes("confirmed") || rawValue === "OFFLINE" || rawValue === "ONLINE") return;
 
             const parts = rawValue.split(',');
@@ -545,11 +545,15 @@
                     const badge = card.querySelector('.node-badge');
                     const timeText = card.querySelector('.node-time');
 
-                    nodeLastSeen[nodeId] = new Date(timestamp).getTime();
-                    badge.innerText = "ONLINE"; badge.className = "node-badge badge-online";
+                    // BUG 4 FIX: Always work with an ISO string, never a raw Date object.
+                    // new Date(timestamp) is safe whether timestamp is a string or Date,
+                    // but formatTimeOnly() calls new Date(isoString) internally — passing
+                    // a consistent ISO string avoids any ambiguity across browsers.
+                    const isoTimestamp = (timestamp instanceof Date) ? timestamp.toISOString() : timestamp;
 
-                    // Use formatTimeOnly for the card display
-                    timeText.innerText = formatTimeOnly(timestamp);
+                    nodeLastSeen[nodeId] = new Date(isoTimestamp).getTime();
+                    badge.innerText = "ONLINE"; badge.className = "node-badge badge-online";
+                    timeText.innerText = formatTimeOnly(isoTimestamp);
                     
                     let extraInfo = ""; let graphValue = null;
                     if (parts[index + 1] && /^\d+(\.\d+)?v?$/i.test(parts[index + 1].trim())) {
@@ -562,7 +566,7 @@
                     if (graphValue === null && magnitude !== '-') graphValue = parseFloat(magnitude);
 
                     const logMsg = `Status: ${status}${extraInfo}`;
-                    addToNodeHistory(nodeId, timestamp, logMsg, graphValue);
+                    addToNodeHistory(nodeId, isoTimestamp, logMsg, graphValue);
                 }
             });
         }
@@ -643,19 +647,25 @@
             const now = new Date();
             lastMqttMessageTime = now.getTime();
             
-            // --- LWT LOGIC ---
-            if (data.value === "OFFLINE") {
-                mainNodeBadge.innerText = "MAIN NODE OFFLINE";
-                mainNodeBadge.className = "status-offline";
-            } else {
-                mainNodeBadge.innerText = "MAIN NODE ONLINE";
-                mainNodeBadge.className = "status-online";
+            // BUG 5 FIX: Only update the main-node badge when the LWT status topic fires.
+            // Previously, ANY mqtt message that wasn't "OFFLINE" would set the badge to
+            // "MAIN NODE ONLINE" — including battery heartbeats from remote nodes.
+            // Now we only react to the dedicated status topic: home/earthquake/status
+            if (data.topic === 'home/earthquake/status') {
+                if (data.value === "OFFLINE") {
+                    mainNodeBadge.innerText = "MAIN NODE OFFLINE";
+                    mainNodeBadge.className = "status-offline";
+                } else if (data.value === "ONLINE") {
+                    mainNodeBadge.innerText = "MAIN NODE ONLINE";
+                    mainNodeBadge.className = "status-online";
+                }
             }
 
-            // Update Node UI (Filtering happens inside)
-            updateNodeUI(data.topic, data.value, now);
+            // BUG 4 FIX: Pass an ISO string, not a raw Date object, so formatTimeOnly()
+            // and new Date() calls inside updateNodeUI() behave consistently.
+            updateNodeUI(data.topic, data.value, now.toISOString());
             
-            // Update Main Table (Allows Confirmed)
+            // Update Main Table — only show confirmed seismic events (payload starts with digit)
             if (data.value && /^\d/.test(data.value.trim()) && /(confirmed|false)/i.test(data.value)) {
                 const p = parsePayload(data.value);
                 logTbody.appendChild(createRow(formatDateTime(now.toISOString()), p.magnitude, p.message || data.topic)); 
