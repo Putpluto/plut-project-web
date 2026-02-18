@@ -105,8 +105,12 @@ mqttClient.on('message', (topic, message) => {
         insertEqArchive.run(nodeName, value, now);
         console.log(`📉 Seismic Log: ${nodeName} -> ${value}`);
 
+        // --- UPDATED LOGIC HERE ---
+        // 1. Check for voltage
+        // 2. EXPLICITLY BLOCK messages containing "confirmed"
         const voltageMatch = value.match(/(\d+\.\d+)v/i);
-        if (voltageMatch) {
+        
+        if (voltageMatch && !value.toLowerCase().includes("confirmed")) {
             const voltage = voltageMatch[1];
             insertBatt.run(nodeName, voltage, value, now);
             console.log(`🔋 Battery Log: ${nodeName} -> ${voltage}V`);
@@ -116,7 +120,6 @@ mqttClient.on('message', (topic, message) => {
 
 // --- 6. API ENDPOINTS ---
 app.get('/api/history', (req, res) => {
-    // INCREASED LIMIT: 100 -> 500
     dbWeb.all("SELECT * FROM messages ORDER BY id DESC LIMIT 500", (err, rows) => {
         if (err) res.status(500).json({ error: err.message });
         else res.json(rows);    });
@@ -130,7 +133,6 @@ app.get('/api/earthquake', (req, res) => {
 });
 
 app.get('/api/battery', (req, res) => {
-    // INCREASED LIMIT: 500 -> 2500 (Allows for ~2-3 days of dense logs)
     dbWeb_batt.all("SELECT * FROM battery_logs ORDER BY id DESC LIMIT 2500", (err, rows) => {
         if (err) res.status(500).json({ error: err.message }); else res.json(rows);
     });
