@@ -130,9 +130,12 @@
 
         tbody tr:nth-child(even) { background-color: var(--bg-dark); }
         
-        .col-time { width: 95px; color: var(--text-dim); }
-        .col-mag { width: 110px; color: var(--mag-color); font-weight: bold; text-align: center; }
+        /* Updated Width to fit DD/MM/YYYY */
+        .col-time { width: 160px; color: var(--text-dim); }
+        .col-mag { width: 100px; color: var(--mag-color); font-weight: bold; text-align: center; }
         .col-msg { color: #a5d6ff; word-break: break-all; }
+
+        .system-row td { color: #ff5555 !important; }
 
         #node-status-panel {
             width: 100%;
@@ -249,7 +252,8 @@
             display: flex; justify-content: space-between;
         }
         .history-item:nth-child(even) { background: var(--bg-dark); }
-        .history-time { color: var(--text-dim); min-width: 130px; }
+        /* Increased width to fit full date */
+        .history-time { color: var(--text-dim); min-width: 140px; }
         .history-msg { color: #a5d6ff; text-align: right; }
 
         /* Allow node-time to wrap so date+time display cleanly */
@@ -364,6 +368,17 @@
         let lastMqttMessageTime = 0;
         let currentChartNode = null;
 
+        // --- NEW: Helper for Consistent Date Formatting ---
+        function formatDateTime(isoString) {
+            if (!isoString) return "Never";
+            const d = new Date(isoString);
+            return d.toLocaleString('en-GB', {
+                day: '2-digit', month: '2-digit', year: 'numeric',
+                hour: '2-digit', minute: '2-digit', second: '2-digit',
+                hour12: false
+            });
+        }
+
         function parsePayload(rawVal) {
             if (!rawVal) return { magnitude: '-', message: '' };
             const parts = rawVal.split(',');
@@ -411,11 +426,10 @@
             else if (pct > 20) battFill.style.backgroundColor = "var(--batt-med)";
             else battFill.style.backgroundColor = "var(--batt-low)";
         }
+        
         function addToNodeHistory(nodeId, timestamp, msg, value) {
-            const d = new Date(timestamp);
-            const dateStr = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
-            const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-            const fullStr = dateStr + ' ' + timeStr;
+            // Updated to use the consistent formatDateTime function
+            const fullStr = formatDateTime(timestamp);
             nodeHistoryLogs[nodeId].unshift({ time: fullStr, msg: msg, value: value });
             if (nodeHistoryLogs[nodeId].length > 100) nodeHistoryLogs[nodeId].pop();
             if (currentChartNode === nodeId) drawHistoryChart(nodeId);
@@ -458,14 +472,20 @@
             const dataPoints = [...logs].reverse().filter(l => l.value !== null && !isNaN(l.value));
             ctx.clearRect(0, 0, w, h);
             
-            const yMin = 0; const yMax = 4.5; const yRange = yMax - yMin;
+            // --- FIX: FIXED SCALING 3.0V - 5.0V ---
+            const yMin = 3.0; 
+            const yMax = 5.0; 
+            const yRange = yMax - yMin;
+            
             ctx.strokeStyle = "#21262d"; ctx.lineWidth = 1; ctx.font = "10px Consolas"; ctx.fillStyle = "#8b949e";
             ctx.textAlign = "left";
 
-            for (let i = 0; i <= 4; i++) {
-                const val = yMin + (yRange * (i / 4));
+            // Draw Clean Grid (Every 0.5V)
+            const step = 0.5;
+            for (let val = yMin; val <= yMax; val += step) {
                 const yPos = h - ((val - yMin) / yRange * h);
                 const drawY = Math.min(Math.max(yPos, 10), h - 5);
+                
                 ctx.beginPath(); ctx.moveTo(0, drawY); ctx.lineTo(w, drawY); ctx.stroke();
                 ctx.fillText(val.toFixed(1) + "V", 5, drawY - 2);
             }
@@ -474,11 +494,16 @@
                 ctx.textAlign = "center"; ctx.fillText("Waiting for data...", w/2, h/2); return;
             }
 
+            // Draw Line
             ctx.beginPath(); ctx.strokeStyle = "#58a6ff"; ctx.lineWidth = 2;
             dataPoints.forEach((pt, i) => {
                 const x = dataPoints.length === 1 ? w/2 : (i / (dataPoints.length - 1)) * w;
-                const normalizedY = (pt.value - yMin) / yRange;
-                const drawY = h - (Math.max(0, Math.min(1, normalizedY)) * h);
+                
+                // Clamp Y values to chart bounds
+                let normalizedY = (pt.value - yMin) / yRange;
+                normalizedY = Math.max(0, Math.min(1, normalizedY));
+                const drawY = h - (normalizedY * h);
+                
                 if (i === 0) ctx.moveTo(x, drawY); else ctx.lineTo(x, drawY);
             });
             ctx.stroke();
@@ -486,8 +511,9 @@
             ctx.fillStyle = "#fff";
             dataPoints.forEach((pt, i) => {
                 const x = dataPoints.length === 1 ? w/2 : (i / (dataPoints.length - 1)) * w;
-                const normalizedY = (pt.value - yMin) / yRange;
-                const drawY = h - (Math.max(0, Math.min(1, normalizedY)) * h);
+                let normalizedY = (pt.value - yMin) / yRange;
+                normalizedY = Math.max(0, Math.min(1, normalizedY));
+                const drawY = h - (normalizedY * h);
                 ctx.beginPath(); ctx.arc(x, drawY, 3, 0, Math.PI * 2); ctx.fill();
             });
             
@@ -497,7 +523,7 @@
         }
 
         function updateNodeUI(topic, rawValue, timestamp) {
-            if (topic !== 'home/earthquake/main_node') return;
+            if (!topic.includes('earthquake/main_node')) return;
             const parts = rawValue.split(',');
             const magnitude = parsePayload(rawValue).magnitude;
 
@@ -518,7 +544,8 @@
                     nodeLastSeen[nodeId] = new Date(timestamp).getTime();
                     badge.innerText = "ONLINE"; badge.className = "node-badge badge-online";
 
-                    timeText.innerText = new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+                    // Use new formatting
+                    timeText.innerText = formatDateTime(timestamp);
                     
                     let extraInfo = ""; let graphValue = null;
                     if (parts[index + 1] && /^\d+(\.\d+)?v?$/i.test(parts[index + 1].trim())) {
@@ -565,7 +592,6 @@
             fetch('/api/earthquake').then(res => res.json()),
             fetch('/api/battery').then(res => res.json())
         ]).then(([carData, quakeData, battData]) => {
-            
             const quakeEvents = quakeData.map(q => ({
                 mag: parsePayload(q.magnitude).magnitude,
                 msg: parsePayload(q.magnitude).message || `Node: ${q.node_id}`,
@@ -573,7 +599,6 @@
                 rawTopic: 'home/earthquake/main_node', 
                 rawVal: q.magnitude
             }));
-
             const carEvents = carData.map(c => ({
                 mag: parsePayload(c.value).magnitude,
                 msg: parsePayload(c.value).message || `Topic: ${c.topic}`,
@@ -581,7 +606,6 @@
                 rawTopic: c.topic,
                 rawVal: c.value
             }));
-
             const battEvents = battData.map(b => ({
                 mag: '-',
                 msg: b.raw_message,
@@ -593,8 +617,9 @@
             const mainTableEvents = [...quakeEvents, ...carEvents];
             mainTableEvents.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
             mainTableEvents.forEach(item => {
-                if (/^\d/.test(item.rawVal.trim()) && /(confirmed|false)/i.test(item.rawVal)) {
-                    logTbody.appendChild(createRow(new Date(item.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}), item.mag, item.msg));
+                if (item.rawVal && /^\d/.test(item.rawVal.trim()) && /(confirmed|false)/i.test(item.rawVal)) {
+                    // Use new formatting
+                    logTbody.appendChild(createRow(formatDateTime(item.timestamp), item.mag, item.msg));
                 }
             });
 
@@ -605,6 +630,11 @@
             });
 
             scrollToBottom();
+        }).catch(err => {
+            console.error("Failed to load initial data", err);
+            // Used simple string here for system error
+            logTbody.appendChild(createRow("ERROR", "API", "Failed to load history data"));
+            logTbody.lastChild.classList.add('system-row');
         });
 
         socket.on('mqtt_message', (data) => {
@@ -616,7 +646,8 @@
             updateNodeUI(data.topic, data.value, now);
             if (/^\d/.test(data.value.trim()) && /(confirmed|false)/i.test(data.value)) {
                 const p = parsePayload(data.value);
-                logTbody.appendChild(createRow(now.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}), p.magnitude, p.message || data.topic)); 
+                // Use new formatting
+                logTbody.appendChild(createRow(formatDateTime(now.toISOString()), p.magnitude, p.message || data.topic)); 
                 if (logTbody.children.length > 100) logTbody.firstChild.remove();
                 scrollToBottom();
             }
@@ -629,8 +660,9 @@
             document.querySelectorAll('.node-time').forEach(t => t.innerText = "Never");
             document.querySelectorAll('.node-val').forEach(v => v.innerText = "N/A");
             document.querySelectorAll('.node-card').forEach(card => updateBatteryUI(card, null));
-            const systemRow = createRow(new Date().toLocaleTimeString(), "SYSTEM", "⚠️ Logs Cleared");
-            systemRow.style.color = "#ff5555";
+            // Use new formatting
+            const systemRow = createRow(formatDateTime(new Date().toISOString()), "SYSTEM", "⚠️ Logs Cleared");
+            systemRow.classList.add('system-row');
             logTbody.appendChild(systemRow);
         });
     </script>
