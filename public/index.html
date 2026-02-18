@@ -130,8 +130,9 @@
 
         tbody tr:nth-child(even) { background-color: var(--bg-dark); }
         
-        .col-time { width: 95px; color: var(--text-dim); }
-        .col-mag { width: 110px; color: var(--mag-color); font-weight: bold; text-align: center; }
+        /* Updated Width to fit DD/MM/YYYY */
+        .col-time { width: 150px; color: var(--text-dim); }
+        .col-mag { width: 100px; color: var(--mag-color); font-weight: bold; text-align: center; }
         .col-msg { color: #a5d6ff; word-break: break-all; }
 
         .system-row td { color: #ff5555 !important; }
@@ -252,7 +253,7 @@
             display: flex; justify-content: space-between;
         }
         .history-item:nth-child(even) { background: var(--bg-dark); }
-        .history-time { color: var(--text-dim); min-width: 80px; }
+        .history-time { color: var(--text-dim); min-width: 110px; }
         .history-msg { color: #a5d6ff; text-align: right; }
         
         .loading-sentinel { padding: 10px; text-align: center; color: var(--text-dim); font-size: 0.8em; }
@@ -372,6 +373,17 @@
         let itemsRendered = 0;
         const BATCH_SIZE = 50;
 
+        function formatDateTime(isoString) {
+            if (!isoString) return "Never";
+            const d = new Date(isoString);
+            // Formats to "DD/MM/YYYY, HH:MM:SS" (GB locale uses dd/mm/yyyy)
+            return d.toLocaleString('en-GB', {
+                day: '2-digit', month: '2-digit', year: 'numeric',
+                hour: '2-digit', minute: '2-digit', second: '2-digit',
+                hour12: false
+            });
+        }
+
         function parsePayload(rawVal) {
             if (!rawVal) return { magnitude: '-', message: '' };
             const parts = rawVal.split(',');
@@ -422,21 +434,21 @@
         }
 
         function addToNodeHistory(nodeId, timestamp, msg, value) {
-            const timeStr = new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+            // Updated to use full date format
+            const timeStr = formatDateTime(timestamp);
+
             if (!nodeHistoryLogs[nodeId]) nodeHistoryLogs[nodeId] = []; 
             nodeHistoryLogs[nodeId].unshift({ time: timeStr, msg: msg, value: value });
             
-            // INCREASED FRONTEND LIMIT: 100 -> 2500
             if (nodeHistoryLogs[nodeId].length > 2500) nodeHistoryLogs[nodeId].pop();
             
             if (currentChartNode === nodeId) {
-                // If modal is open, verify if we need to prepend to the list immediately
                 if (itemsRendered > 0) {
                      const div = document.createElement('div');
                      div.className = 'history-item';
                      div.innerHTML = `<span class="history-time">${timeStr}</span><span class="history-msg">${msg}</span>`;
                      modalList.insertBefore(div, modalList.firstChild);
-                     itemsRendered++; // Maintain count
+                     itemsRendered++; 
                 }
                 drawHistoryChart(nodeId);
             }
@@ -446,7 +458,7 @@
         function renderNextBatch(nodeId) {
             const logs = nodeHistoryLogs[nodeId] || [];
             const total = logs.length;
-            if (itemsRendered >= total) return; // All loaded
+            if (itemsRendered >= total) return; 
 
             const end = Math.min(itemsRendered + BATCH_SIZE, total);
             const fragment = document.createDocumentFragment();
@@ -487,7 +499,7 @@
             if (logs.length === 0) {
                 modalList.innerHTML = `<div class="history-item" style="justify-content:center; color:#8b949e;">No history available</div>`;
             } else {
-                renderNextBatch(nodeId); // Initial Render
+                renderNextBatch(nodeId); 
             }
             modal.style.display = "flex";
             setTimeout(() => drawHistoryChart(nodeId), 50);
@@ -507,15 +519,21 @@
             const dataPoints = [...logs].reverse().filter(l => l.value !== null && !isNaN(l.value));
             ctx.clearRect(0, 0, w, h);
             
-            const yMin = 3.0; const yMax = 4.5; const yRange = yMax - yMin; 
+            // FIXED SCALING: 3.0V to 5.0V with 0.5V steps
+            const yMin = 3.0; 
+            const yMax = 5.0; 
+            const yRange = yMax - yMin; 
+            
             ctx.strokeStyle = "#21262d"; ctx.lineWidth = 1; ctx.font = "10px Consolas"; ctx.fillStyle = "#8b949e";
             ctx.textAlign = "left";
 
-            // Draw Grid
-            for (let i = 0; i <= 4; i++) {
-                const val = yMin + (yRange * (i / 4));
+            // Draw Clean Grid (Every 0.5V)
+            // 3.0, 3.5, 4.0, 4.5, 5.0
+            const step = 0.5;
+            for (let val = yMin; val <= yMax; val += step) {
                 const yPos = h - ((val - yMin) / yRange * h);
                 const drawY = Math.min(Math.max(yPos, 10), h - 5);
+                
                 ctx.beginPath(); ctx.moveTo(0, drawY); ctx.lineTo(w, drawY); ctx.stroke();
                 ctx.fillText(val.toFixed(1) + "V", 5, drawY - 2);
             }
@@ -528,8 +546,11 @@
             ctx.beginPath(); ctx.strokeStyle = "#58a6ff"; ctx.lineWidth = 2;
             dataPoints.forEach((pt, i) => {
                 const x = dataPoints.length === 1 ? w/2 : (i / (dataPoints.length - 1)) * w;
-                const normalizedY = (pt.value - yMin) / yRange;
-                const drawY = h - (Math.max(0, Math.min(1, normalizedY)) * h);
+                // Clamp Y values to chart bounds
+                let normalizedY = (pt.value - yMin) / yRange;
+                normalizedY = Math.max(0, Math.min(1, normalizedY));
+                
+                const drawY = h - (normalizedY * h);
                 if (i === 0) ctx.moveTo(x, drawY); else ctx.lineTo(x, drawY);
             });
             ctx.stroke();
@@ -539,8 +560,9 @@
                 ctx.fillStyle = "#fff";
                 dataPoints.forEach((pt, i) => {
                     const x = dataPoints.length === 1 ? w/2 : (i / (dataPoints.length - 1)) * w;
-                    const normalizedY = (pt.value - yMin) / yRange;
-                    const drawY = h - (Math.max(0, Math.min(1, normalizedY)) * h);
+                    let normalizedY = (pt.value - yMin) / yRange;
+                    normalizedY = Math.max(0, Math.min(1, normalizedY));
+                    const drawY = h - (normalizedY * h);
                     ctx.beginPath(); ctx.arc(x, drawY, 3, 0, Math.PI * 2); ctx.fill();
                 });
             }
@@ -572,7 +594,9 @@
 
                     nodeLastSeen[nodeId] = new Date(timestamp).getTime();
                     badge.innerText = "ONLINE"; badge.className = "node-badge badge-online";
-                    timeText.innerText = new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+                    
+                    // Use new formatting function
+                    timeText.innerText = formatDateTime(timestamp);
                     
                     let extraInfo = ""; let graphValue = null;
                     if (parts[index + 1] && /^\d+(\.\d+)?v?$/i.test(parts[index + 1].trim())) {
@@ -645,7 +669,8 @@
             mainTableEvents.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
             mainTableEvents.forEach(item => {
                 if (item.rawVal && /^\d/.test(item.rawVal.trim()) && /(confirmed|false)/i.test(item.rawVal)) {
-                    logTbody.appendChild(createRow(new Date(item.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}), item.mag, item.msg));
+                    // Use new formatting function
+                    logTbody.appendChild(createRow(formatDateTime(item.timestamp), item.mag, item.msg));
                 }
             });
 
@@ -671,7 +696,8 @@
             
             if (data.value && /^\d/.test(data.value.trim()) && /(confirmed|false)/i.test(data.value)) {
                 const p = parsePayload(data.value);
-                logTbody.appendChild(createRow(now.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}), p.magnitude, p.message || data.topic)); 
+                // Use new formatting function
+                logTbody.appendChild(createRow(formatDateTime(now.toISOString()), p.magnitude, p.message || data.topic)); 
                 if (logTbody.children.length > 100) logTbody.removeChild(logTbody.firstChild);
                 scrollToBottom();
             }
@@ -684,7 +710,7 @@
             document.querySelectorAll('.node-time').forEach(t => t.innerText = "Never");
             document.querySelectorAll('.node-val').forEach(v => v.innerText = "N/A");
             document.querySelectorAll('.node-card').forEach(card => updateBatteryUI(card, null));
-            const systemRow = createRow(new Date().toLocaleTimeString(), "SYSTEM", "⚠️ Logs Cleared", "system-row");
+            const systemRow = createRow(formatDateTime(new Date().toISOString()), "SYSTEM", "⚠️ Logs Cleared", "system-row");
             logTbody.appendChild(systemRow);
         });
     </script>
