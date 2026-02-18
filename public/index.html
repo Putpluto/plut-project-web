@@ -544,8 +544,12 @@
                     nodeLastSeen[nodeId] = new Date(timestamp).getTime();
                     badge.innerText = "ONLINE"; badge.className = "node-badge badge-online";
 
-                    // Use new formatting
-                    timeText.innerText = formatDateTime(timestamp);
+                    timeText.innerText = new Date(timestamp).toLocaleTimeString('en-GB', { 
+                        hour: '2-digit', 
+                        minute: '2-digit', 
+                        second: '2-digit',
+                        hour12: false 
+                    });
                     
                     let extraInfo = ""; let graphValue = null;
                     if (parts[index + 1] && /^\d+(\.\d+)?v?$/i.test(parts[index + 1].trim())) {
