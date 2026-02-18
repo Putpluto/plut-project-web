@@ -529,7 +529,9 @@
 
             parts.forEach((part, index) => {
                 if (part.toLowerCase().includes("main node")) return;
+                if (rawValue.toLowerCase().includes("confirmed")) return;
                 const match = part.match(/node\s*(\d+)\s*:\s*(confirmed|alive|false)/i);
+                const parts = rawValue.split(',');
                 
                 if (match) {
                     const nodeNum = match[1];

@@ -88,32 +88,24 @@ mqttClient.on('message', (topic, message) => {
     const value = message.toString();
     const now = new Date().toISOString();
     
-    // Global Live Update for the Frontend
+    // 1. Always emit to frontend so it shows up in the Main Log Table
     io.emit('mqtt_message', { topic, value, timestamp: now });
 
-    if (value.toLowerCase().includes("main node:")) {
-        return; 
-    }
+    // 2. Ignore heartbeats for database saving
+    if (value.toLowerCase().includes("main node:")) return; 
 
-    if (topic.startsWith('fsae/')) {
-        insertFsaeWeb.run(topic, value, now);
-        insertFsaeArchive.run(topic, value, now);
-    } else if (topic.startsWith('home/earthquake/')) {
+    if (topic.startsWith('home/earthquake/')) {
         const nodeName = topic.split('/').pop(); 
         
+        // 3. Save to Earthquake Logs (Seismic Data) - "confirmed" stays here!
         insertEqWeb.run(nodeName, value, now);
         insertEqArchive.run(nodeName, value, now);
-        console.log(`📉 Seismic Log: ${nodeName} -> ${value}`);
 
-        // --- UPDATED LOGIC HERE ---
-        // 1. Check for voltage
-        // 2. EXPLICITLY BLOCK messages containing "confirmed"
+        // 4. Filter for Battery DB - "confirmed" is BLOCKED here
         const voltageMatch = value.match(/(\d+\.\d+)v/i);
-        
         if (voltageMatch && !value.toLowerCase().includes("confirmed")) {
             const voltage = voltageMatch[1];
             insertBatt.run(nodeName, voltage, value, now);
-            console.log(`🔋 Battery Log: ${nodeName} -> ${voltage}V`);
         }
     }
 });
