@@ -130,7 +130,6 @@
 
         tbody tr:nth-child(even) { background-color: var(--bg-dark); }
         
-        /* Updated Width to fit DD/MM/YYYY */
         .col-time { width: 160px; color: var(--text-dim); }
         .col-mag { width: 100px; color: var(--mag-color); font-weight: bold; text-align: center; }
         .col-msg { color: #a5d6ff; word-break: break-all; }
@@ -252,12 +251,10 @@
             display: flex; justify-content: space-between;
         }
         .history-item:nth-child(even) { background: var(--bg-dark); }
-        /* Increased width to fit full date */
         .history-time { color: var(--text-dim); min-width: 140px; }
         .history-msg { color: #a5d6ff; text-align: right; }
 
-        /* Allow node-time to wrap so date+time display cleanly */
-        .node-time { display: inline-block; }
+        .node-time { display: inline-block; font-weight: bold; color: var(--text-main); }
 
     </style>
 </head>
@@ -361,6 +358,7 @@
         const logListDiv = document.getElementById('log-list');
         const statusBadge = document.getElementById('status-badge');
         const mainNodeBadge = document.getElementById('main-node-badge');
+        const modalList = document.getElementById('modal-log-list');
 
         const nodeLastSeen = { 'node1': null, 'node2': null, 'node3': null };
         const nodeHistoryLogs = { 'node1': [], 'node2': [], 'node3': [] };
@@ -368,7 +366,7 @@
         let lastMqttMessageTime = 0;
         let currentChartNode = null;
 
-        // --- NEW: Helper for Consistent Date Formatting ---
+        // Helper: Full Date for History Log & Main Table
         function formatDateTime(isoString) {
             if (!isoString) return "Never";
             const d = new Date(isoString);
@@ -376,6 +374,15 @@
                 day: '2-digit', month: '2-digit', year: 'numeric',
                 hour: '2-digit', minute: '2-digit', second: '2-digit',
                 hour12: false
+            });
+        }
+
+        // Helper: Time Only for Node Cards
+        function formatTimeOnly(isoString) {
+            if (!isoString) return "Never";
+            const d = new Date(isoString);
+            return d.toLocaleTimeString('en-GB', { 
+                hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false 
             });
         }
 
@@ -428,7 +435,6 @@
         }
         
         function addToNodeHistory(nodeId, timestamp, msg, value) {
-            // Updated to use the consistent formatDateTime function
             const fullStr = formatDateTime(timestamp);
             nodeHistoryLogs[nodeId].unshift({ time: fullStr, msg: msg, value: value });
             if (nodeHistoryLogs[nodeId].length > 100) nodeHistoryLogs[nodeId].pop();
@@ -472,7 +478,7 @@
             const dataPoints = [...logs].reverse().filter(l => l.value !== null && !isNaN(l.value));
             ctx.clearRect(0, 0, w, h);
             
-            // --- FIX: FIXED SCALING 3.0V - 5.0V ---
+            // Fixed Scale: 3.0V - 5.0V
             const yMin = 3.0; 
             const yMax = 5.0; 
             const yRange = yMax - yMin;
@@ -480,12 +486,11 @@
             ctx.strokeStyle = "#21262d"; ctx.lineWidth = 1; ctx.font = "10px Consolas"; ctx.fillStyle = "#8b949e";
             ctx.textAlign = "left";
 
-            // Draw Clean Grid (Every 0.5V)
+            // Grid lines every 0.5V
             const step = 0.5;
             for (let val = yMin; val <= yMax; val += step) {
                 const yPos = h - ((val - yMin) / yRange * h);
                 const drawY = Math.min(Math.max(yPos, 10), h - 5);
-                
                 ctx.beginPath(); ctx.moveTo(0, drawY); ctx.lineTo(w, drawY); ctx.stroke();
                 ctx.fillText(val.toFixed(1) + "V", 5, drawY - 2);
             }
@@ -494,16 +499,12 @@
                 ctx.textAlign = "center"; ctx.fillText("Waiting for data...", w/2, h/2); return;
             }
 
-            // Draw Line
             ctx.beginPath(); ctx.strokeStyle = "#58a6ff"; ctx.lineWidth = 2;
             dataPoints.forEach((pt, i) => {
                 const x = dataPoints.length === 1 ? w/2 : (i / (dataPoints.length - 1)) * w;
-                
-                // Clamp Y values to chart bounds
                 let normalizedY = (pt.value - yMin) / yRange;
                 normalizedY = Math.max(0, Math.min(1, normalizedY));
                 const drawY = h - (normalizedY * h);
-                
                 if (i === 0) ctx.moveTo(x, drawY); else ctx.lineTo(x, drawY);
             });
             ctx.stroke();
@@ -524,14 +525,15 @@
 
         function updateNodeUI(topic, rawValue, timestamp) {
             if (!topic.includes('earthquake/main_node')) return;
+            
+            // --- FILTER: Block 'confirmed', 'ONLINE', 'OFFLINE' from graphs/history ---
+            if (rawValue.toLowerCase().includes("confirmed") || rawValue === "OFFLINE" || rawValue === "ONLINE") return;
+
             const parts = rawValue.split(',');
             const magnitude = parsePayload(rawValue).magnitude;
 
             parts.forEach((part, index) => {
-                if (part.toLowerCase().includes("main node")) return;
-                if (rawValue.toLowerCase().includes("confirmed")) return;
-                const match = part.match(/node\s*(\d+)\s*:\s*(confirmed|alive|false)/i);
-                const parts = rawValue.split(',');
+                const match = part.match(/node\s*(\d+)\s*:\s*(alive|false)/i);
                 
                 if (match) {
                     const nodeNum = match[1];
@@ -546,12 +548,8 @@
                     nodeLastSeen[nodeId] = new Date(timestamp).getTime();
                     badge.innerText = "ONLINE"; badge.className = "node-badge badge-online";
 
-                    timeText.innerText = new Date(timestamp).toLocaleTimeString('en-GB', { 
-                        hour: '2-digit', 
-                        minute: '2-digit', 
-                        second: '2-digit',
-                        hour12: false 
-                    });
+                    // Use formatTimeOnly for the card display
+                    timeText.innerText = formatTimeOnly(timestamp);
                     
                     let extraInfo = ""; let graphValue = null;
                     if (parts[index + 1] && /^\d+(\.\d+)?v?$/i.test(parts[index + 1].trim())) {
@@ -624,7 +622,6 @@
             mainTableEvents.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
             mainTableEvents.forEach(item => {
                 if (item.rawVal && /^\d/.test(item.rawVal.trim()) && /(confirmed|false)/i.test(item.rawVal)) {
-                    // Use new formatting
                     logTbody.appendChild(createRow(formatDateTime(item.timestamp), item.mag, item.msg));
                 }
             });
@@ -638,7 +635,6 @@
             scrollToBottom();
         }).catch(err => {
             console.error("Failed to load initial data", err);
-            // Used simple string here for system error
             logTbody.appendChild(createRow("ERROR", "API", "Failed to load history data"));
             logTbody.lastChild.classList.add('system-row');
         });
@@ -646,13 +642,22 @@
         socket.on('mqtt_message', (data) => {
             const now = new Date();
             lastMqttMessageTime = now.getTime();
-            mainNodeBadge.innerText = "MAIN NODE ONLINE";
-            mainNodeBadge.className = "status-online";
+            
+            // --- LWT LOGIC ---
+            if (data.value === "OFFLINE") {
+                mainNodeBadge.innerText = "MAIN NODE OFFLINE";
+                mainNodeBadge.className = "status-offline";
+            } else {
+                mainNodeBadge.innerText = "MAIN NODE ONLINE";
+                mainNodeBadge.className = "status-online";
+            }
 
+            // Update Node UI (Filtering happens inside)
             updateNodeUI(data.topic, data.value, now);
-            if (/^\d/.test(data.value.trim()) && /(confirmed|false)/i.test(data.value)) {
+            
+            // Update Main Table (Allows Confirmed)
+            if (data.value && /^\d/.test(data.value.trim()) && /(confirmed|false)/i.test(data.value)) {
                 const p = parsePayload(data.value);
-                // Use new formatting
                 logTbody.appendChild(createRow(formatDateTime(now.toISOString()), p.magnitude, p.message || data.topic)); 
                 if (logTbody.children.length > 100) logTbody.firstChild.remove();
                 scrollToBottom();
@@ -666,7 +671,6 @@
             document.querySelectorAll('.node-time').forEach(t => t.innerText = "Never");
             document.querySelectorAll('.node-val').forEach(v => v.innerText = "N/A");
             document.querySelectorAll('.node-card').forEach(card => updateBatteryUI(card, null));
-            // Use new formatting
             const systemRow = createRow(formatDateTime(new Date().toISOString()), "SYSTEM", "⚠️ Logs Cleared");
             systemRow.classList.add('system-row');
             logTbody.appendChild(systemRow);
