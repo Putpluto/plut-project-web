@@ -64,7 +64,7 @@
             white-space: nowrap;
         }
         
-        .status-online { background-color: #238636 !important; color: white !important; }
+        .status-online  { background-color: #238636 !important; color: white !important; }
         .status-offline { background-color: #da3633 !important; color: white !important; }
 
         .dashboard-wrapper {
@@ -131,8 +131,8 @@
         tbody tr:nth-child(even) { background-color: var(--bg-dark); }
         
         .col-time { width: 160px; color: var(--text-dim); }
-        .col-mag { width: 100px; color: var(--mag-color); font-weight: bold; text-align: center; }
-        .col-msg { color: #a5d6ff; word-break: break-all; }
+        .col-mag  { width: 100px; color: var(--mag-color); font-weight: bold; text-align: center; }
+        .col-msg  { color: #a5d6ff; word-break: break-all; }
 
         .system-row td { color: #ff5555 !important; }
 
@@ -174,7 +174,7 @@
         }
 
         .badge-offline { background-color: #3e2020; color: var(--offline); border: 1px solid #6e2d2d; }
-        .badge-online { background-color: #1e3a22; color: var(--online); border: 1px solid #2d6e35; }
+        .badge-online  { background-color: #1e3a22; color: var(--online);  border: 1px solid #2d6e35; }
 
         .node-footer { 
             font-size: 0.75em; 
@@ -252,10 +252,9 @@
         }
         .history-item:nth-child(even) { background: var(--bg-dark); }
         .history-time { color: var(--text-dim); min-width: 140px; }
-        .history-msg { color: #a5d6ff; text-align: right; }
+        .history-msg  { color: #a5d6ff; text-align: right; }
 
         .node-time { display: inline-block; font-weight: bold; color: var(--text-main); }
-
     </style>
 </head>
 <body>
@@ -353,20 +352,29 @@
     </div>
 
     <script>
-        const socket = io();
-        const logTbody = document.getElementById('log-tbody');
-        const logListDiv = document.getElementById('log-list');
-        const statusBadge = document.getElementById('status-badge');
+        const socket        = io();
+        const logTbody      = document.getElementById('log-tbody');
+        const logListDiv    = document.getElementById('log-list');
+        const statusBadge   = document.getElementById('status-badge');
         const mainNodeBadge = document.getElementById('main-node-badge');
-        const modalList = document.getElementById('modal-log-list');
+        const modalList     = document.getElementById('modal-log-list');
 
-        const nodeLastSeen = { 'node1': null, 'node2': null, 'node3': null };
-        const nodeHistoryLogs = { 'node1': [], 'node2': [], 'node3': [] };
+        const nodeLastSeen    = { 'node1': null, 'node2': null, 'node3': null };
+        const nodeHistoryLogs = { 'node1': [],   'node2': [],   'node3': []   };
         
-        let lastMqttMessageTime = 0;
         let currentChartNode = null;
 
-        // Helper: Full Date for History Log & Main Table
+        // --- HELPER: update the main node badge cleanly ---
+        function setMainNodeBadge(status) {
+            if (status === "ONLINE") {
+                mainNodeBadge.innerText  = "MAIN NODE ONLINE";
+                mainNodeBadge.className  = "status-online";
+            } else {
+                mainNodeBadge.innerText  = "MAIN NODE OFFLINE";
+                mainNodeBadge.className  = "status-offline";
+            }
+        }
+
         function formatDateTime(isoString) {
             if (!isoString) return "Never";
             const d = new Date(isoString);
@@ -377,7 +385,6 @@
             });
         }
 
-        // Helper: Time Only for Node Cards
         function formatTimeOnly(isoString) {
             if (!isoString) return "Never";
             const d = new Date(isoString);
@@ -388,14 +395,14 @@
 
         function parsePayload(rawVal) {
             if (!rawVal) return { magnitude: '-', message: '' };
-            const parts = rawVal.split(',');
+            const parts     = rawVal.split(',');
             const firstPart = parts[0].trim();
             const isNumeric = !isNaN(parseFloat(firstPart)) && isFinite(firstPart);
 
             if (parts.length > 1) {
                 return {
                     magnitude: isNumeric ? firstPart : '-',
-                    message: isNumeric ? parts.slice(1).join(', ').trim() : rawVal
+                    message:   isNumeric ? parts.slice(1).join(', ').trim() : rawVal
                 };
             }
             return { magnitude: isNumeric ? rawVal : '-', message: isNumeric ? '' : rawVal };
@@ -411,9 +418,9 @@
 
         function updateBatteryUI(card, voltage) {
             const battWrapper = card.querySelector('.batt-wrapper');
-            const battFill = card.querySelector('.batt-bar-fill');
-            const battText = card.querySelector('.batt-text');
-            const valText = card.querySelector('.node-val');
+            const battFill    = card.querySelector('.batt-bar-fill');
+            const battText    = card.querySelector('.batt-text');
+            const valText     = card.querySelector('.node-val');
 
             if (!voltage) {
                 battWrapper.style.opacity = "0.3";
@@ -421,17 +428,17 @@
             }
 
             valText.innerText = voltage;
-            const v = parseFloat(voltage);
-            let pct = ((v - 3.0) / (4.2 - 3.0)) * 100;
-            pct = Math.max(0, Math.min(100, pct)); 
+            const v   = parseFloat(voltage);
+            let pct   = ((v - 3.0) / (4.2 - 3.0)) * 100;
+            pct       = Math.max(0, Math.min(100, pct)); 
 
             battWrapper.style.opacity = "1";
-            battText.innerText = Math.round(pct) + "%";
-            battFill.style.width = pct + "%";
+            battText.innerText        = Math.round(pct) + "%";
+            battFill.style.width      = pct + "%";
             
-            if (pct > 50) battFill.style.backgroundColor = "var(--batt-high)";
+            if      (pct > 50) battFill.style.backgroundColor = "var(--batt-high)";
             else if (pct > 20) battFill.style.backgroundColor = "var(--batt-med)";
-            else battFill.style.backgroundColor = "var(--batt-low)";
+            else               battFill.style.backgroundColor = "var(--batt-low)";
         }
         
         function addToNodeHistory(nodeId, timestamp, msg, value) {
@@ -445,10 +452,10 @@
             currentChartNode = nodeId;
             const modal = document.getElementById('history-modal');
             const title = document.getElementById('modal-title');
-            const list = document.getElementById('modal-log-list');
+            const list  = document.getElementById('modal-log-list');
 
             title.innerText = nodeId.toUpperCase() + " HISTORY";
-            list.innerHTML = "";
+            list.innerHTML  = "";
 
             const logs = nodeHistoryLogs[nodeId] || [];
             if (logs.length === 0) {
@@ -469,27 +476,22 @@
         
         function drawHistoryChart(nodeId) {
             const canvas = document.getElementById('historyChart');
-            const ctx = canvas.getContext('2d');
-            const logs = nodeHistoryLogs[nodeId] || [];
-            const rect = canvas.parentNode.getBoundingClientRect();
+            const ctx    = canvas.getContext('2d');
+            const logs   = nodeHistoryLogs[nodeId] || [];
+            const rect   = canvas.parentNode.getBoundingClientRect();
             canvas.width = rect.width; canvas.height = rect.height;
             const w = canvas.width; const h = canvas.height;
 
             const dataPoints = [...logs].reverse().filter(l => l.value !== null && !isNaN(l.value));
             ctx.clearRect(0, 0, w, h);
             
-            // Fixed Scale: 3.0V - 5.0V
-            const yMin = 3.0; 
-            const yMax = 5.0; 
-            const yRange = yMax - yMin;
+            const yMin = 3.0; const yMax = 5.0; const yRange = yMax - yMin;
             
             ctx.strokeStyle = "#21262d"; ctx.lineWidth = 1; ctx.font = "10px Consolas"; ctx.fillStyle = "#8b949e";
             ctx.textAlign = "left";
 
-            // Grid lines every 0.5V
-            const step = 0.5;
-            for (let val = yMin; val <= yMax; val += step) {
-                const yPos = h - ((val - yMin) / yRange * h);
+            for (let val = yMin; val <= yMax; val += 0.5) {
+                const yPos  = h - ((val - yMin) / yRange * h);
                 const drawY = Math.min(Math.max(yPos, 10), h - 5);
                 ctx.beginPath(); ctx.moveTo(0, drawY); ctx.lineTo(w, drawY); ctx.stroke();
                 ctx.fillText(val.toFixed(1) + "V", 5, drawY - 2);
@@ -502,9 +504,8 @@
             ctx.beginPath(); ctx.strokeStyle = "#58a6ff"; ctx.lineWidth = 2;
             dataPoints.forEach((pt, i) => {
                 const x = dataPoints.length === 1 ? w/2 : (i / (dataPoints.length - 1)) * w;
-                let normalizedY = (pt.value - yMin) / yRange;
-                normalizedY = Math.max(0, Math.min(1, normalizedY));
-                const drawY = h - (normalizedY * h);
+                let ny = Math.max(0, Math.min(1, (pt.value - yMin) / yRange));
+                const drawY = h - (ny * h);
                 if (i === 0) ctx.moveTo(x, drawY); else ctx.lineTo(x, drawY);
             });
             ctx.stroke();
@@ -512,9 +513,8 @@
             ctx.fillStyle = "#fff";
             dataPoints.forEach((pt, i) => {
                 const x = dataPoints.length === 1 ? w/2 : (i / (dataPoints.length - 1)) * w;
-                let normalizedY = (pt.value - yMin) / yRange;
-                normalizedY = Math.max(0, Math.min(1, normalizedY));
-                const drawY = h - (normalizedY * h);
+                let ny = Math.max(0, Math.min(1, (pt.value - yMin) / yRange));
+                const drawY = h - (ny * h);
                 ctx.beginPath(); ctx.arc(x, drawY, 3, 0, Math.PI * 2); ctx.fill();
             });
             
@@ -526,102 +526,109 @@
         function updateNodeUI(topic, rawValue, timestamp) {
             if (!topic.includes('earthquake/main_node')) return;
             
-            // --- FILTER: Block 'confirmed', 'ONLINE', 'OFFLINE' from node graphs/cards ---
+            // Block confirmed/ONLINE/OFFLINE from the node cards — those are handled separately
             if (rawValue.toLowerCase().includes("confirmed") || rawValue === "OFFLINE" || rawValue === "ONLINE") return;
 
-            const parts = rawValue.split(',');
+            const parts     = rawValue.split(',');
             const magnitude = parsePayload(rawValue).magnitude;
+
+            // Always work with an ISO string, never a raw Date object
+            const isoTimestamp = (timestamp instanceof Date) ? timestamp.toISOString() : timestamp;
 
             parts.forEach((part, index) => {
                 const match = part.match(/node\s*(\d+)\s*:\s*(alive|false)/i);
                 
                 if (match) {
                     const nodeNum = match[1];
-                    const status = match[2].toLowerCase();
-                    const nodeId = `node${nodeNum}`; 
-                    const card = document.getElementById(`card-${nodeId}`);
+                    const status  = match[2].toLowerCase();
+                    const nodeId  = `node${nodeNum}`; 
+                    const card    = document.getElementById(`card-${nodeId}`);
                     if (!card) return;
 
-                    const badge = card.querySelector('.node-badge');
+                    const badge    = card.querySelector('.node-badge');
                     const timeText = card.querySelector('.node-time');
 
-                    // BUG 4 FIX: Always work with an ISO string, never a raw Date object.
-                    // new Date(timestamp) is safe whether timestamp is a string or Date,
-                    // but formatTimeOnly() calls new Date(isoString) internally — passing
-                    // a consistent ISO string avoids any ambiguity across browsers.
-                    const isoTimestamp = (timestamp instanceof Date) ? timestamp.toISOString() : timestamp;
-
-                    nodeLastSeen[nodeId] = new Date(isoTimestamp).getTime();
-                    badge.innerText = "ONLINE"; badge.className = "node-badge badge-online";
-                    timeText.innerText = formatTimeOnly(isoTimestamp);
+                    nodeLastSeen[nodeId]   = new Date(isoTimestamp).getTime();
+                    badge.innerText        = "ONLINE";
+                    badge.className        = "node-badge badge-online";
+                    timeText.innerText     = formatTimeOnly(isoTimestamp);
                     
                     let extraInfo = ""; let graphValue = null;
                     if (parts[index + 1] && /^\d+(\.\d+)?v?$/i.test(parts[index + 1].trim())) {
                         const vStr = parts[index + 1].trim();
                         updateBatteryUI(card, vStr);
-                        extraInfo = ` | Batt: ${vStr}`;
+                        extraInfo  = ` | Batt: ${vStr}`;
                         graphValue = parseFloat(vStr);
                     }
 
                     if (graphValue === null && magnitude !== '-') graphValue = parseFloat(magnitude);
 
-                    const logMsg = `Status: ${status}${extraInfo}`;
-                    addToNodeHistory(nodeId, isoTimestamp, logMsg, graphValue);
+                    addToNodeHistory(nodeId, isoTimestamp, `Status: ${status}${extraInfo}`, graphValue);
                 }
             });
         }
 
+        // --- TIMEOUT: Only flip remote NODE cards offline, NOT the main node badge.
+        // The main node badge is driven purely by LWT via main_node_status events.
         setInterval(() => {
-            const now = Date.now();
-            if (lastMqttMessageTime > 0 && (now - lastMqttMessageTime > 60000)) {
-                mainNodeBadge.innerText = "MAIN NODE OFFLINE";
-                mainNodeBadge.className = "status-offline";
-            }
-            const timeoutThreshold = 90 * 60 * 1000; 
+            const now              = Date.now();
+            const timeoutThreshold = 90 * 60 * 1000; // 90 minutes
             Object.keys(nodeLastSeen).forEach(nodeId => {
                 if (nodeLastSeen[nodeId] && (now - nodeLastSeen[nodeId] > timeoutThreshold)) {
                     const card = document.getElementById(`card-${nodeId}`);
                     if (card) {
-                        card.querySelector('.node-badge').innerText = "OFFLINE";
-                        card.querySelector('.node-badge').className = "node-badge badge-offline";
-                        nodeLastSeen[nodeId] = null; updateBatteryUI(card, null);
+                        card.querySelector('.node-badge').innerText   = "OFFLINE";
+                        card.querySelector('.node-badge').className   = "node-badge badge-offline";
+                        nodeLastSeen[nodeId] = null;
+                        updateBatteryUI(card, null);
                     }
                 }
             });
-        }, 1000); 
+        }, 1000);
 
+        // --- BROKER CONNECTION STATUS (server <-> broker) ---
         socket.on('status_update', (data) => {
-            statusBadge.innerText = data.status;
-            statusBadge.className = data.status === 'ONLINE' ? 'status-online' : 'status-offline';
+            statusBadge.innerText   = data.status;
+            statusBadge.className   = data.status === 'ONLINE' ? 'status-online' : 'status-offline';
         });
 
+        // --- MAIN NODE LWT STATUS (ESP32 <-> broker) ---
+        // This event is emitted by server.js both on new connections (to replay the
+        // cached state) and whenever a new ONLINE/OFFLINE message arrives from the broker.
+        // This is the ONLY thing that should update the main-node badge.
+        socket.on('main_node_status', (data) => {
+            setMainNodeBadge(data.status);
+        });
+
+        // --- LOAD HISTORICAL DATA ---
         Promise.all([
             fetch('/api/history').then(res => res.json()),
             fetch('/api/earthquake').then(res => res.json()),
             fetch('/api/battery').then(res => res.json())
         ]).then(([carData, quakeData, battData]) => {
             const quakeEvents = quakeData.map(q => ({
-                mag: parsePayload(q.magnitude).magnitude,
-                msg: parsePayload(q.magnitude).message || `Node: ${q.node_id}`,
+                mag:      parsePayload(q.magnitude).magnitude,
+                msg:      parsePayload(q.magnitude).message || `Node: ${q.node_id}`,
                 timestamp: q.timestamp,
                 rawTopic: 'home/earthquake/main_node', 
-                rawVal: q.magnitude
+                rawVal:   q.magnitude
             }));
             const carEvents = carData.map(c => ({
-                mag: parsePayload(c.value).magnitude,
-                msg: parsePayload(c.value).message || `Topic: ${c.topic}`,
+                mag:      parsePayload(c.value).magnitude,
+                msg:      parsePayload(c.value).message || `Topic: ${c.topic}`,
                 timestamp: c.timestamp,
                 rawTopic: c.topic,
-                rawVal: c.value
+                rawVal:   c.value
             }));
             const battEvents = battData.map(b => ({
-                mag: '-',
-                msg: b.raw_message,
+                mag:      '-',
+                msg:      b.raw_message,
                 timestamp: b.timestamp,
                 rawTopic: 'home/earthquake/main_node',
-                rawVal: b.raw_message
+                rawVal:   b.raw_message
             }));
 
+            // Main seismic event table
             const mainTableEvents = [...quakeEvents, ...carEvents];
             mainTableEvents.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
             mainTableEvents.forEach(item => {
@@ -630,11 +637,10 @@
                 }
             });
 
+            // Node cards history
             const fullNodeHistory = [...quakeEvents, ...battEvents];
             fullNodeHistory.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-            fullNodeHistory.forEach(item => {
-                updateNodeUI(item.rawTopic, item.rawVal, item.timestamp);
-            });
+            fullNodeHistory.forEach(item => updateNodeUI(item.rawTopic, item.rawVal, item.timestamp));
 
             scrollToBottom();
         }).catch(err => {
@@ -643,37 +649,21 @@
             logTbody.lastChild.classList.add('system-row');
         });
 
+        // --- LIVE MQTT MESSAGES ---
         socket.on('mqtt_message', (data) => {
-            const now = new Date();
-            lastMqttMessageTime = now.getTime();
+            // Pass ISO string always — never a raw Date object
+            updateNodeUI(data.topic, data.value, data.timestamp);
             
-            // BUG 5 FIX: Only update the main-node badge when the LWT status topic fires.
-            // Previously, ANY mqtt message that wasn't "OFFLINE" would set the badge to
-            // "MAIN NODE ONLINE" — including battery heartbeats from remote nodes.
-            // Now we only react to the dedicated status topic: home/earthquake/status
-            if (data.topic === 'home/earthquake/status') {
-                if (data.value === "OFFLINE") {
-                    mainNodeBadge.innerText = "MAIN NODE OFFLINE";
-                    mainNodeBadge.className = "status-offline";
-                } else if (data.value === "ONLINE") {
-                    mainNodeBadge.innerText = "MAIN NODE ONLINE";
-                    mainNodeBadge.className = "status-online";
-                }
-            }
-
-            // BUG 4 FIX: Pass an ISO string, not a raw Date object, so formatTimeOnly()
-            // and new Date() calls inside updateNodeUI() behave consistently.
-            updateNodeUI(data.topic, data.value, now.toISOString());
-            
-            // Update Main Table — only show confirmed seismic events (payload starts with digit)
+            // Seismic alarm events → main log table
             if (data.value && /^\d/.test(data.value.trim()) && /(confirmed|false)/i.test(data.value)) {
                 const p = parsePayload(data.value);
-                logTbody.appendChild(createRow(formatDateTime(now.toISOString()), p.magnitude, p.message || data.topic)); 
+                logTbody.appendChild(createRow(formatDateTime(data.timestamp), p.magnitude, p.message || data.topic)); 
                 if (logTbody.children.length > 100) logTbody.firstChild.remove();
                 scrollToBottom();
             }
         });
 
+        // --- HISTORY CLEARED ---
         socket.on('history_cleared', () => {
             logTbody.innerHTML = '';
             Object.keys(nodeHistoryLogs).forEach(k => nodeHistoryLogs[k] = []);

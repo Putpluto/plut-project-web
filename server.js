@@ -39,14 +39,19 @@ dbArchive.serialize(() => { initFsaeTable(dbArchive); initEarthquakeTable(dbArch
 dbWeb_batt.serialize(() => { initBatteryTable(dbWeb_batt); });
 
 // --- 4. PREPARED STATEMENTS ---
-const insertFsaeWeb = dbWeb.prepare("INSERT INTO messages (topic, value, timestamp) VALUES (?, ?, ?)");
-const insertEqWeb = dbWeb.prepare("INSERT INTO earthquake_logs (node_id, magnitude, timestamp) VALUES (?, ?, ?)");
+const insertFsaeWeb     = dbWeb.prepare("INSERT INTO messages (topic, value, timestamp) VALUES (?, ?, ?)");
+const insertEqWeb       = dbWeb.prepare("INSERT INTO earthquake_logs (node_id, magnitude, timestamp) VALUES (?, ?, ?)");
 const insertFsaeArchive = dbArchive.prepare("INSERT INTO messages (topic, value, timestamp) VALUES (?, ?, ?)");
-const insertEqArchive = dbArchive.prepare("INSERT INTO earthquake_logs (node_id, magnitude, timestamp) VALUES (?, ?, ?)");
-const insertBatt = dbWeb_batt.prepare("INSERT INTO battery_logs (node_id, voltage, raw_message, timestamp) VALUES (?, ?, ?, ?)");
+const insertEqArchive   = dbArchive.prepare("INSERT INTO earthquake_logs (node_id, magnitude, timestamp) VALUES (?, ?, ?)");
+const insertBatt        = dbWeb_batt.prepare("INSERT INTO battery_logs (node_id, voltage, raw_message, timestamp) VALUES (?, ?, ?, ?)");
 
 // --- 5. MQTT SETUP ---
-let brokerStatus = "Disconnected";
+// brokerStatus   = is THIS SERVER connected to the MQTT broker?
+// mainNodeStatus = is the ESP32 main node online? (tracked from LWT messages)
+// These are kept in memory so any new browser tab that connects later
+// gets the correct state immediately — not just tabs open at the moment of change.
+let brokerStatus   = "Disconnected";
+let mainNodeStatus = "OFFLINE"; // Assume offline until the broker delivers the retained "ONLINE"
 
 const mqttClient = mqtt.connect('mqtt://127.0.0.1:1883', {
     reconnectPeriod: 1000,
@@ -55,7 +60,7 @@ const mqttClient = mqtt.connect('mqtt://127.0.0.1:1883', {
     clientId: 'pluto_server_' + Math.random().toString(16).substring(2, 8) 
 });
 
-mqttClient.on('connect', (connack) => {
+mqttClient.on('connect', () => {
     console.log(`✅ MQTT Broker Connected`);
     mqttClient.subscribe(['fsae/#', 'home/earthquake/#']);
     brokerStatus = "ONLINE";
@@ -65,10 +70,18 @@ mqttClient.on('connect', (connack) => {
 mqttClient.on('message', (topic, message) => {
     const value = message.toString();
     const now = new Date().toISOString();
-    
-    // --- LWT / STATUS LOGGING ---
-    if (value === "ONLINE" || value === "OFFLINE") {
-        console.log(`📡 Status Change: ${topic} -> ${value}`);
+
+    // --- LWT STATUS TRACKING ---
+    // The ESP32 publishes "ONLINE" (retained) on connect, and the broker
+    // auto-publishes "OFFLINE" (retained) if the ESP32 dies.
+    // We cache this in mainNodeStatus so new browser connections get it immediately.
+    if (topic === 'home/earthquake/status') {
+        if (value === "ONLINE" || value === "OFFLINE") {
+            mainNodeStatus = value;
+            console.log(`📡 Main Node Status changed: ${value}`);
+            // Also broadcast immediately to all currently connected browsers
+            io.emit('main_node_status', { status: mainNodeStatus });
+        }
     }
 
     // 1. EMIT TO FRONTEND — always emit with topic so frontend can filter correctly
@@ -84,17 +97,13 @@ mqttClient.on('message', (topic, message) => {
     } else if (topic.startsWith('home/earthquake/')) {
         const nodeName = topic.split('/').pop(); 
         
-        // SAVE TO SEISMIC DB (LWT "OFFLINE" messages are saved here as a record)
+        // SAVE TO SEISMIC DB (LWT "OFFLINE" messages saved here as a record)
         insertEqWeb.run(nodeName, value, now);
         insertEqArchive.run(nodeName, value, now);
 
-        // BUG 3 FIX: Use a tighter voltage regex that only matches the numeric
-        // portion of the voltage string (e.g. "3.85" from "3.85V"), anchored to
-        // reject compound strings like "3.85V,MOTION DETECTED".
-        // The .ino now sends clean voltage-only strings (e.g. "node1:alive,3.85V"),
-        // but this defensive regex ensures we never store garbage even if format drifts.
+        // Save battery voltage — anchored regex, only matches clean "X.XXV" fields
         const voltageMatch = value.match(/(?:^|,)(\d+\.\d+)[Vv](?:,|$)/);
-        const isStatusMsg = value === "ONLINE" || value === "OFFLINE" || value.toLowerCase().includes("confirmed");
+        const isStatusMsg  = value === "ONLINE" || value === "OFFLINE" || value.toLowerCase().includes("confirmed");
         
         if (voltageMatch && !isStatusMsg) {
             const voltage = voltageMatch[1];
@@ -103,7 +112,18 @@ mqttClient.on('message', (topic, message) => {
     }
 });
 
-// --- 6. API ENDPOINTS ---
+// --- 6. SOCKET.IO CONNECTION ---
+// When a new browser tab opens, immediately send it both statuses.
+// Without sending mainNodeStatus here, every page refresh would show
+// "MAIN NODE OFFLINE" even if the ESP32 has been online for hours,
+// because the retained MQTT message was already delivered to the server
+// and won't be re-sent just because a new browser connected.
+io.on('connection', (socket) => {
+    socket.emit('status_update',    { status: brokerStatus });
+    socket.emit('main_node_status', { status: mainNodeStatus });
+});
+
+// --- 7. API ENDPOINTS ---
 app.get('/api/history', (req, res) => {
     dbWeb.all("SELECT * FROM messages ORDER BY id DESC LIMIT 500", (err, rows) => {
         if (err) res.status(500).json({ error: err.message }); else res.json(rows);
@@ -139,8 +159,6 @@ app.delete('/api/history', (req, res) => {
         });
     });
 });
-
-io.on('connection', (socket) => { socket.emit('status_update', { status: brokerStatus }); });
 
 const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => { console.log(`🚀 Control Panel Server: http://localhost:${PORT}`); });
