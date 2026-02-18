@@ -134,6 +134,8 @@
         .col-mag { width: 110px; color: var(--mag-color); font-weight: bold; text-align: center; }
         .col-msg { color: #a5d6ff; word-break: break-all; }
 
+        .system-row td { color: #ff5555 !important; }
+
         #node-status-panel {
             width: 100%;
             border: 1px solid var(--border);
@@ -242,18 +244,18 @@
         
         canvas { display: block; width: 100%; height: 100%; }
 
-        .modal-body { padding: 0; overflow-y: auto; flex: 1; }
+        /* Infinite scroll optimization */
+        .modal-body { padding: 0; overflow-y: auto; flex: 1; will-change: transform; }
 
         .history-item {
             padding: 8px 12px; border-bottom: 1px solid #21262d; font-size: 0.8em;
             display: flex; justify-content: space-between;
         }
         .history-item:nth-child(even) { background: var(--bg-dark); }
-        .history-time { color: var(--text-dim); min-width: 130px; }
+        .history-time { color: var(--text-dim); min-width: 80px; }
         .history-msg { color: #a5d6ff; text-align: right; }
-
-        /* Allow node-time to wrap so date+time display cleanly */
-        .node-time { display: inline-block; }
+        
+        .loading-sentinel { padding: 10px; text-align: center; color: var(--text-dim); font-size: 0.8em; }
 
     </style>
 </head>
@@ -347,6 +349,7 @@
             <div class="chart-wrapper">
                 <canvas id="historyChart"></canvas>
             </div>
+            <!-- Added Scroll Event Listener in JS -->
             <div class="modal-body" id="modal-log-list"></div>
         </div>
     </div>
@@ -357,12 +360,17 @@
         const logListDiv = document.getElementById('log-list');
         const statusBadge = document.getElementById('status-badge');
         const mainNodeBadge = document.getElementById('main-node-badge');
+        const modalList = document.getElementById('modal-log-list');
 
         const nodeLastSeen = { 'node1': null, 'node2': null, 'node3': null };
         const nodeHistoryLogs = { 'node1': [], 'node2': [], 'node3': [] };
         
         let lastMqttMessageTime = 0;
         let currentChartNode = null;
+
+        // --- INFINITE SCROLL STATE ---
+        let itemsRendered = 0;
+        const BATCH_SIZE = 50;
 
         function parsePayload(rawVal) {
             if (!rawVal) return { magnitude: '-', message: '' };
@@ -379,8 +387,9 @@
             return { magnitude: isNumeric ? rawVal : '-', message: isNumeric ? '' : rawVal };
         }
 
-        function createRow(timeStr, magnitude, message) {
+        function createRow(timeStr, magnitude, message, className = '') {
             const tr = document.createElement('tr');
+            if (className) tr.className = className;
             tr.innerHTML = `<td class="col-time">${timeStr}</td><td class="col-mag">${magnitude}</td><td class="col-msg">${message}</td>`;
             return tr;
         }
@@ -413,34 +422,72 @@
         }
 
         function addToNodeHistory(nodeId, timestamp, msg, value) {
-            const d = new Date(timestamp);
-            const dateStr = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
-            const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-            const fullStr = dateStr + ' ' + timeStr;
-            nodeHistoryLogs[nodeId].unshift({ time: fullStr, msg: msg, value: value });
-            if (nodeHistoryLogs[nodeId].length > 100) nodeHistoryLogs[nodeId].pop();
-            if (currentChartNode === nodeId) drawHistoryChart(nodeId);
+            const timeStr = new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+            if (!nodeHistoryLogs[nodeId]) nodeHistoryLogs[nodeId] = []; 
+            nodeHistoryLogs[nodeId].unshift({ time: timeStr, msg: msg, value: value });
+            
+            // INCREASED FRONTEND LIMIT: 100 -> 2500
+            if (nodeHistoryLogs[nodeId].length > 2500) nodeHistoryLogs[nodeId].pop();
+            
+            if (currentChartNode === nodeId) {
+                // If modal is open, verify if we need to prepend to the list immediately
+                if (itemsRendered > 0) {
+                     const div = document.createElement('div');
+                     div.className = 'history-item';
+                     div.innerHTML = `<span class="history-time">${timeStr}</span><span class="history-msg">${msg}</span>`;
+                     modalList.insertBefore(div, modalList.firstChild);
+                     itemsRendered++; // Maintain count
+                }
+                drawHistoryChart(nodeId);
+            }
         }
+
+        // --- BATCH RENDER FUNCTION ---
+        function renderNextBatch(nodeId) {
+            const logs = nodeHistoryLogs[nodeId] || [];
+            const total = logs.length;
+            if (itemsRendered >= total) return; // All loaded
+
+            const end = Math.min(itemsRendered + BATCH_SIZE, total);
+            const fragment = document.createDocumentFragment();
+
+            for (let i = itemsRendered; i < end; i++) {
+                const log = logs[i];
+                const div = document.createElement('div');
+                div.className = 'history-item';
+                div.innerHTML = `<span class="history-time">${log.time}</span><span class="history-msg">${log.msg}</span>`;
+                fragment.appendChild(div);
+            }
+
+            modalList.appendChild(fragment);
+            itemsRendered = end;
+        }
+
+        // --- SCROLL HANDLER ---
+        modalList.addEventListener('scroll', () => {
+            if (!currentChartNode) return;
+            // Check if near bottom
+            if (modalList.scrollTop + modalList.clientHeight >= modalList.scrollHeight - 50) {
+                renderNextBatch(currentChartNode);
+            }
+        });
 
         function openNodeHistory(nodeId) {
             currentChartNode = nodeId;
             const modal = document.getElementById('history-modal');
             const title = document.getElementById('modal-title');
-            const list = document.getElementById('modal-log-list');
-
+            
             title.innerText = nodeId.toUpperCase() + " HISTORY";
-            list.innerHTML = "";
+            
+            // RESET LIST
+            modalList.innerHTML = "";
+            itemsRendered = 0;
 
             const logs = nodeHistoryLogs[nodeId] || [];
             if (logs.length === 0) {
-                list.innerHTML = `<div class="history-item" style="justify-content:center; color:#8b949e;">No history available</div>`;
+                modalList.innerHTML = `<div class="history-item" style="justify-content:center; color:#8b949e;">No history available</div>`;
             } else {
-                logs.forEach(log => {
-                    const div = document.createElement('div');
-                    div.className = 'history-item';
-                    div.innerHTML = `<span class="history-time">${log.time}</span><span class="history-msg">${log.msg}</span>`;
-                    list.appendChild(div);
-                });
+                renderNextBatch(nodeId); // Initial Render
             }
             modal.style.display = "flex";
             setTimeout(() => drawHistoryChart(nodeId), 50);
@@ -450,6 +497,7 @@
         
         function drawHistoryChart(nodeId) {
             const canvas = document.getElementById('historyChart');
+            if (!canvas) return;
             const ctx = canvas.getContext('2d');
             const logs = nodeHistoryLogs[nodeId] || [];
             const rect = canvas.parentNode.getBoundingClientRect();
@@ -459,10 +507,11 @@
             const dataPoints = [...logs].reverse().filter(l => l.value !== null && !isNaN(l.value));
             ctx.clearRect(0, 0, w, h);
             
-            const yMin = 0; const yMax = 4.5; const yRange = yMax - yMin;
+            const yMin = 3.0; const yMax = 4.5; const yRange = yMax - yMin; 
             ctx.strokeStyle = "#21262d"; ctx.lineWidth = 1; ctx.font = "10px Consolas"; ctx.fillStyle = "#8b949e";
             ctx.textAlign = "left";
 
+            // Draw Grid
             for (let i = 0; i <= 4; i++) {
                 const val = yMin + (yRange * (i / 4));
                 const yPos = h - ((val - yMin) / yRange * h);
@@ -475,6 +524,7 @@
                 ctx.textAlign = "center"; ctx.fillText("Waiting for data...", w/2, h/2); return;
             }
 
+            // Draw Line
             ctx.beginPath(); ctx.strokeStyle = "#58a6ff"; ctx.lineWidth = 2;
             dataPoints.forEach((pt, i) => {
                 const x = dataPoints.length === 1 ? w/2 : (i / (dataPoints.length - 1)) * w;
@@ -484,13 +534,16 @@
             });
             ctx.stroke();
 
-            ctx.fillStyle = "#fff";
-            dataPoints.forEach((pt, i) => {
-                const x = dataPoints.length === 1 ? w/2 : (i / (dataPoints.length - 1)) * w;
-                const normalizedY = (pt.value - yMin) / yRange;
-                const drawY = h - (Math.max(0, Math.min(1, normalizedY)) * h);
-                ctx.beginPath(); ctx.arc(x, drawY, 3, 0, Math.PI * 2); ctx.fill();
-            });
+            // PERFORMANCE OPTIMIZATION: Only draw dots if we have < 100 points
+            if (dataPoints.length < 100) {
+                ctx.fillStyle = "#fff";
+                dataPoints.forEach((pt, i) => {
+                    const x = dataPoints.length === 1 ? w/2 : (i / (dataPoints.length - 1)) * w;
+                    const normalizedY = (pt.value - yMin) / yRange;
+                    const drawY = h - (Math.max(0, Math.min(1, normalizedY)) * h);
+                    ctx.beginPath(); ctx.arc(x, drawY, 3, 0, Math.PI * 2); ctx.fill();
+                });
+            }
             
             const lastPt = dataPoints[dataPoints.length - 1];
             ctx.textAlign = "right"; ctx.fillStyle = "#58a6ff"; ctx.font = "bold 12px Consolas";
@@ -498,7 +551,8 @@
         }
 
         function updateNodeUI(topic, rawValue, timestamp) {
-            if (topic !== 'home/earthquake/main_node') return;
+            if (!topic.includes('earthquake/main_node')) return;
+            
             const parts = rawValue.split(',');
             const magnitude = parsePayload(rawValue).magnitude;
 
@@ -518,7 +572,6 @@
 
                     nodeLastSeen[nodeId] = new Date(timestamp).getTime();
                     badge.innerText = "ONLINE"; badge.className = "node-badge badge-online";
-
                     timeText.innerText = new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
                     
                     let extraInfo = ""; let graphValue = null;
@@ -566,7 +619,6 @@
             fetch('/api/earthquake').then(res => res.json()),
             fetch('/api/battery').then(res => res.json())
         ]).then(([carData, quakeData, battData]) => {
-            
             const quakeEvents = quakeData.map(q => ({
                 mag: parsePayload(q.magnitude).magnitude,
                 msg: parsePayload(q.magnitude).message || `Node: ${q.node_id}`,
@@ -574,7 +626,6 @@
                 rawTopic: 'home/earthquake/main_node', 
                 rawVal: q.magnitude
             }));
-
             const carEvents = carData.map(c => ({
                 mag: parsePayload(c.value).magnitude,
                 msg: parsePayload(c.value).message || `Topic: ${c.topic}`,
@@ -582,7 +633,6 @@
                 rawTopic: c.topic,
                 rawVal: c.value
             }));
-
             const battEvents = battData.map(b => ({
                 mag: '-',
                 msg: b.raw_message,
@@ -594,18 +644,21 @@
             const mainTableEvents = [...quakeEvents, ...carEvents];
             mainTableEvents.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
             mainTableEvents.forEach(item => {
-                if (/^\d/.test(item.rawVal.trim()) && /(confirmed|false)/i.test(item.rawVal)) {
+                if (item.rawVal && /^\d/.test(item.rawVal.trim()) && /(confirmed|false)/i.test(item.rawVal)) {
                     logTbody.appendChild(createRow(new Date(item.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}), item.mag, item.msg));
                 }
             });
 
-            const fullNodeHistory = [...quakeEvents, ...battEvents];
+            const fullNodeHistory = [...quakeEvents, ...carEvents, ...battEvents];
             fullNodeHistory.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
             fullNodeHistory.forEach(item => {
-                updateNodeUI(item.rawTopic, item.rawVal, item.timestamp);
+                if(item.rawVal) updateNodeUI(item.rawTopic, item.rawVal, item.timestamp);
             });
 
             scrollToBottom();
+        }).catch(err => {
+            console.error("Failed to load initial data", err);
+            logTbody.appendChild(createRow("ERROR", "API", "Failed to load history data", "system-row"));
         });
 
         socket.on('mqtt_message', (data) => {
@@ -615,10 +668,11 @@
             mainNodeBadge.className = "status-online";
 
             updateNodeUI(data.topic, data.value, now);
-            if (/^\d/.test(data.value.trim()) && /(confirmed|false)/i.test(data.value)) {
+            
+            if (data.value && /^\d/.test(data.value.trim()) && /(confirmed|false)/i.test(data.value)) {
                 const p = parsePayload(data.value);
                 logTbody.appendChild(createRow(now.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}), p.magnitude, p.message || data.topic)); 
-                if (logTbody.children.length > 100) logTbody.firstChild.remove();
+                if (logTbody.children.length > 100) logTbody.removeChild(logTbody.firstChild);
                 scrollToBottom();
             }
         });
@@ -630,8 +684,7 @@
             document.querySelectorAll('.node-time').forEach(t => t.innerText = "Never");
             document.querySelectorAll('.node-val').forEach(v => v.innerText = "N/A");
             document.querySelectorAll('.node-card').forEach(card => updateBatteryUI(card, null));
-            const systemRow = createRow(new Date().toLocaleTimeString(), "SYSTEM", "⚠️ Logs Cleared");
-            systemRow.style.color = "#ff5555";
+            const systemRow = createRow(new Date().toLocaleTimeString(), "SYSTEM", "⚠️ Logs Cleared", "system-row");
             logTbody.appendChild(systemRow);
         });
     </script>

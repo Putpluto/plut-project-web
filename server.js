@@ -14,7 +14,6 @@ app.use(cors());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // --- 2. DUAL DATABASE SETUP ---
-// FIXED: dbWeb_batt is the correct variable name
 const dbWeb_batt = new sqlite3.Database('./plutobattery.db');
 const dbWeb = new sqlite3.Database('./pluto.db');
 const dbArchive = new sqlite3.Database('./pluto_archive.db');
@@ -57,8 +56,6 @@ function initEarthquakeTable(db) {
 
 dbWeb.serialize(() => { initFsaeTable(dbWeb); initEarthquakeTable(dbWeb); });
 dbArchive.serialize(() => { initFsaeTable(dbArchive); initEarthquakeTable(dbArchive); });
-
-// FIXED: Used correct variable dbWeb_batt instead of dbBatt
 dbWeb_batt.serialize(() => { initBatteryTable(dbWeb_batt); });
 
 // --- 4. PREPARED STATEMENTS ---
@@ -66,8 +63,6 @@ const insertFsaeWeb = dbWeb.prepare("INSERT INTO messages (topic, value, timesta
 const insertEqWeb = dbWeb.prepare("INSERT INTO earthquake_logs (node_id, magnitude, timestamp) VALUES (?, ?, ?)");
 const insertFsaeArchive = dbArchive.prepare("INSERT INTO messages (topic, value, timestamp) VALUES (?, ?, ?)");
 const insertEqArchive = dbArchive.prepare("INSERT INTO earthquake_logs (node_id, magnitude, timestamp) VALUES (?, ?, ?)");
-
-// FIXED: Used correct variable dbWeb_batt instead of dbBatt
 const insertBatt = dbWeb_batt.prepare("INSERT INTO battery_logs (node_id, voltage, raw_message, timestamp) VALUES (?, ?, ?, ?)");
 
 // --- 5. MQTT SETUP ---
@@ -93,28 +88,23 @@ mqttClient.on('message', (topic, message) => {
     const value = message.toString();
     const now = new Date().toISOString();
     
-    // Global Live Update for the Frontend (Updates badges/status)
+    // Global Live Update for the Frontend
     io.emit('mqtt_message', { topic, value, timestamp: now });
 
-    // --- CRITICAL FILTER: DO NOT SAVE MAIN NODE HEARTBEATS ---
     if (value.toLowerCase().includes("main node:")) {
         return; 
     }
 
-    // --- INTELLIGENT DATA ROUTING ---
     if (topic.startsWith('fsae/')) {
         insertFsaeWeb.run(topic, value, now);
         insertFsaeArchive.run(topic, value, now);
     } else if (topic.startsWith('home/earthquake/')) {
         const nodeName = topic.split('/').pop(); 
         
-        // 1. Save to Earthquake Logs
         insertEqWeb.run(nodeName, value, now);
         insertEqArchive.run(nodeName, value, now);
         console.log(`📉 Seismic Log: ${nodeName} -> ${value}`);
 
-        // 2. NEW: Extract and Save Battery Data
-        // Check if message looks like "Node 1: Alive, 4.02v" or just contains a voltage
         const voltageMatch = value.match(/(\d+\.\d+)v/i);
         if (voltageMatch) {
             const voltage = voltageMatch[1];
@@ -126,21 +116,22 @@ mqttClient.on('message', (topic, message) => {
 
 // --- 6. API ENDPOINTS ---
 app.get('/api/history', (req, res) => {
-    dbWeb.all("SELECT * FROM messages ORDER BY id DESC LIMIT 100", (err, rows) => {
+    // INCREASED LIMIT: 100 -> 500
+    dbWeb.all("SELECT * FROM messages ORDER BY id DESC LIMIT 500", (err, rows) => {
         if (err) res.status(500).json({ error: err.message });
         else res.json(rows);    });
 });
 
 app.get('/api/earthquake', (req, res) => {
-    dbWeb.all("SELECT * FROM earthquake_logs ORDER BY id DESC LIMIT 50", (err, rows) => {
+    dbWeb.all("SELECT * FROM earthquake_logs ORDER BY id DESC LIMIT 100", (err, rows) => {
         if (err) res.status(500).json({ error: err.message });
         else res.json(rows);
     });
 });
 
 app.get('/api/battery', (req, res) => {
-    // FIXED: Query the correct database variable
-    dbWeb_batt.all("SELECT * FROM battery_logs ORDER BY id DESC LIMIT 500", (err, rows) => {
+    // INCREASED LIMIT: 500 -> 2500 (Allows for ~2-3 days of dense logs)
+    dbWeb_batt.all("SELECT * FROM battery_logs ORDER BY id DESC LIMIT 2500", (err, rows) => {
         if (err) res.status(500).json({ error: err.message }); else res.json(rows);
     });
 });
@@ -151,7 +142,6 @@ app.delete('/api/history', (req, res) => {
         return res.status(403).json({ error: "Unauthorized" });
     }
     
-    // Parallel cleanup
     const cleanWeb = new Promise((resolve, reject) => {
         dbWeb.serialize(() => {
             dbWeb.run("DELETE FROM messages");
